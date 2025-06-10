@@ -44,31 +44,12 @@ llm = ChatOpenAI(model="gpt-4o").bind_tools(tools)
 
 
 
-def news_agent(state: AgentState) -> AgentState:
-    """This node will solve the request you input"""
-
-    
-    pass
-
-    # ########## if you are just beginning chat #####
-    # if state["initialize_chat"] == 1:
-    #     state["messages"] =  [system_prompt] + state["messages"]
-    #     state["initialize_chat"] = 0
-    #     print(state["messages"])
-    #     return state
-    
-    # else:
-    #     state["messages"].append(AIMessage(content=response.content))
-    #     return {"messages": [response]}
-
-
-
 # AGENT NODE FUNCTION ######
 def ReAct(state: AgentState) -> AgentState:
 
     ####### define system prompt ########
     system_prompt = SystemMessage(content=
-   "You are my AI Assistant, please answer my query to the best of your ability")
+   "You are my AI Assistant named RYO, please introduce yourself and answer my query to the best of your ability")
 
     
     response = llm.invoke([system_prompt] + state["messages"])
@@ -92,7 +73,7 @@ graph = StateGraph(AgentState)
 ###### (A) Add nodes ######  
 
 ### 1. Chat Nodes ####
-graph.add_node("News Agent", news_agent)
+
 graph.add_node("ReAct Node", ReAct)
 
 ### 2. Tool Node #####
@@ -102,10 +83,7 @@ graph.add_node("tools", tool_node)
 
 #### (B) Add edges ######
 
-graph.add_edge(START, "News Agent")
-
-
-graph.add_edge("News Agent", "ReAct Node")
+graph.add_edge(START, "ReAct Node")
 
 
 graph.add_conditional_edges(
@@ -117,7 +95,7 @@ graph.add_conditional_edges(
     }
 )
 
-graph.add_edge("tools", "News Agent")
+graph.add_edge("tools", "ReAct Node")
 
 
 agent =  graph.compile()
@@ -143,12 +121,18 @@ def stream_agent(stream, show_stream=True):
 
 
 conversation_history = []
-user_input = input("Ask Ryo anything: ")
-while user_input.lower()!= "thanks ryo":
+initialize_chat  = 1
+user_input = input("Ask Ryo Anything!: ")
+while user_input!= "exit":
+
     conversation_history.append(HumanMessage(content=user_input))
+ 
+    if user_input == "":
+        conversation_history.append(HumanMessage(content="Nothing was typed by the user can you ask again what they wanted based on the previous context."))
 
     inputs = {"messages": [("user", "\n".join([i.content for i in conversation_history]))],
-              "initialize_chat" : initialize_chat} 
+                "initialize_chat" : initialize_chat} 
+
 
     result = stream_agent(agent.stream(inputs, stream_mode="values"), show_stream=False)
 
@@ -158,7 +142,9 @@ while user_input.lower()!= "thanks ryo":
 
     initialize_chat  = 0
     
-    user_input = input("Ask Ryo anything: ")
+    user_input = input("Enter: ")
+
+
 
 
 with open("outputs/logging.txt", "w") as file:
