@@ -8,9 +8,14 @@ RYO is your autonomous life-balance partner that protects personal time from wor
 ## 🤖 What can this Bot Do?
 
 #### Unlike existing AI Agents where you need to engage it. This agent will engage you. Are you ready?</font> 😎🔥
-🎯 Set and Track General Goals: Set daily, weekly or monthly goals and RYO will help you track it. <br>
-🥗 Meal Prep : RYO will to prepare meals (with recipes) looking at your existing inventory. <br>
-💪 Track Gym Goals : RYO will plan your weekly exercise - which exercise on which day, which equipments, how many sets. <br>
+🎯 Set and Track General Goals and RYO will help you engage in it and track it.<br>
+🥗 Meal Prep with finesse and ease using RYO's recipies and food inventory management. <br>
+💪 Track Gym Goals and be on top of using RYO's weekly routine.<br>
+🗞️ Stay informed of the current events with RYO's personalized news headlines.<br>
+🕒 These agents of RYO's will work together to adjust to your changing schedules.<br>
+
+#### Let RYO manage and track your personal goals and flow through life while being organized and stress free!
+
 
 
 ## 🚀 Current Status
