@@ -7,16 +7,16 @@ RYO is your autonomous life-balance partner that protects personal time from wor
 
 ## 🤖 What can this Bot Do?
 
-### Unlike existing AI Agents where you need to engage it. This agent will engage you. Are you ready?</font> 😎🔥
-🎯 Set and Track General Goals : Set daily, weekly or monthly goals and this bot will help you track progress on these goals. <br>
-🥗 Meal Prep : Look at your existing food inventory and its health (shelf-life) and help plan to prepare meals (with recipes). <br>
-💪 Track Gym Goals : Plan your week and exercise - How many days, which exercise on which day, which equipments, how many sets. <br>
+#### Unlike existing AI Agents where you need to engage it. This agent will engage you. Are you ready?</font> 😎🔥
+🎯 Set and Track General Goals: Set daily, weekly or monthly goals and RYO will help you track it. <br>
+🥗 Meal Prep : RYO will to prepare meals (with recipes) looking at your existing inventory. <br>
+💪 Track Gym Goals : RYO will plan your weekly exercise - which exercise on which day, which equipments, how many sets. <br>
 
 
 ## 🚀 Current Status
 Work in progress: shooting for a beta in 6 months.
 
-### Done...
+### Completed Tasks
 ✅ Testing LLM Components - LLM Local Connection, Tools <br>
 ✅ Setting up discord bot and connecting to local environment via API <br>
 ✅ Testing End-to-End integration User ↔️ Discord Bot (Connecting Locally to LLMs) <br>
@@ -24,12 +24,12 @@ Work in progress: shooting for a beta in 6 months.
 
 <img src="images/Discord_UI.jpeg" width="400" height="800" alt="Image description">
 
-### Ongoing...
+### Ongoing Tasks
 ⚙️ Formalizing Design <br>
 ⚙️ Finalizing Features <br>
 ⚙️ Strategizing Evaluation <br>
 
-### TBD...
+### TBD
 ⏳ Commence Full Development <br>
 ⏳ Finish Production <br>
 ⏳ Estimate Costs <br>
