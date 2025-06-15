@@ -13,7 +13,7 @@ RYO is your autonomous life-balance partner that protects personal time from wor
 💪 Track Gym Goals and be on top of using RYO's weekly routine.<br>
 🗞️ Stay informed of the current events with RYO's personalized news headlines.<br>
 📅 Based on the upcoming events set smart reminders with recommendations to include in your daily schedule.<br>
-🕒 These agents of RYO's will work together to adjust to your changing schedules.<br>
+🕒 These agents of RYO will work together to adjust to your changing schedules.<br>
 
 #### Let RYO manage and track your personal goals and flow through life while being organized and stress free!
 
