@@ -7,5 +7,5 @@ RYŌ is your autonomous life-balance partner that protects personal time from wo
 
 
 ## 🚀 Status
-Work in progress — shooting for a beta in 6 months.
+Work in progress: shooting for a beta in 6 months.
 
