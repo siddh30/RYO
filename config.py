@@ -9,7 +9,7 @@ load_dotenv()
 
 class Config():
 
-    ########## SECRETS ###############
+    ########## SECRETS #################
     discord_token = os.getenv('DISCORD_TOKEN')
 
 
