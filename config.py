@@ -17,6 +17,7 @@ class Config():
     model = ChatOpenAI(model="gpt-4o")
 
 
+
     ################# NEWS AGENT ################
 
     ### Name ###
