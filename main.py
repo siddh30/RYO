@@ -21,10 +21,11 @@ class Client(discord.Client):
         if message.author == self.user:
             return
         
-        result = news_agent.invoke({"messages": [{"role": "user", "content":message.content.strip()}]},
-        conf.news_agent_configs)
+        async with message.channel.typing():
+            result = news_agent.invoke({"messages": [{"role": "user", "content":message.content.strip()}]},
+            conf.news_agent_configs)
 
-        await message.channel.send(result['messages'][-1].content) 
+            await message.channel.send(result['messages'][-1].content) 
 
 
 client = Client(intents=intents)
