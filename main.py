@@ -2,10 +2,13 @@ from config import Config
 conf = Config()
 
 ##### News Agent ###
-from agents.news_agent import news_agent 
+from agents.supervisor import ryo
 
 ##### Connect to Discord #####
 import discord
+
+####### Bud
+from langchain_core.prompts import PromptTemplate
 
 # Define the intents your bot needs
 intents = discord.Intents.default()
@@ -21,12 +24,12 @@ class Client(discord.Client):
         if message.author == self.user:
             return
         
-        result = news_agent.invoke({"messages": [{"role": "user", "content":message.content.strip()}]},
-        conf.news_agent_configs)
+        async with message.channel.typing():
+            result = ryo.invoke({"messages": [{"role": "user", "content":message.content.strip()}]},
+            conf.news_agent_configs)
 
-        await message.channel.send(result['messages'][-1].content) 
+            await message.channel.send(result['messages'][-1].content) 
 
 
 client = Client(intents=intents)
 client.run(conf.discord_token)
-
