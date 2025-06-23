@@ -15,6 +15,5 @@ news_agent = create_react_agent(
     tools = conf.news_agent_tools,
     name =  conf.news_agent_name,
     prompt = conf.news_agent_prompt,
-    checkpointer= InMemorySaver(),
 
 ) 

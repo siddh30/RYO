@@ -9,6 +9,9 @@ load_dotenv()
 
 class Config():
 
+    base_dir = '/Users/siddharth/Desktop/Data-Science-Universe/Projects/LLMS/Ryo'
+    memory_path = f"{base_dir}/memory"
+
     ########## SECRETS #################
     discord_token = os.getenv('DISCORD_TOKEN')
 
@@ -30,9 +33,14 @@ class Config():
     ### configurations ###
     news_agent_configs = {"configurable":{"thread_id":1}}
 
+    ryo_configs = {"configurable":{"thread_id":1}}
+
 
     #### Agent Prompt ###
     news_agent_prompt = "You are a news reporter, please use all the given tools to provide the latest, most accurate news."
+
+
+    
 
 
 
