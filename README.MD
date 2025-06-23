@@ -26,13 +26,19 @@ Work in progress: shooting for a beta in 6 months.
 ✅ Testing LLM Components - LLM Local Connection, Tools <br>
 ✅ Setting up discord bot and connecting to local environment via API <br>
 ✅ Testing End-to-End integration User ↔️ Discord Bot (Connecting Locally to LLMs) <br>
+✅ Short Term and Long Term Memory established <br>
+
+
 
 
 <img src="images/Discord_UI.jpeg" width="400" height="800" alt="Image description">
 
 ### Ongoing Tasks
+⚙️ Delete Memories and Reminders once done <br>
+⚙️ Working on Pinging Components <br>
 ⚙️ Formalizing Design <br>
 ⚙️ Finalizing Features <br>
+⚙️ Developing and Optimizing Features <br>
 ⚙️ Strategizing Evaluation <br>
 
 ### TBD
