@@ -8,7 +8,8 @@ from langgraph_supervisor.handoff import create_forward_message_tool
 
 ######### Import Agents #########
 from agents.news_agent import news_agent
-from agents.central_memory_agent import central_memory_agent
+from agents.search_agent import search_agent
+from agents.central_memory_supervisor import cms
 
 ###### From config #######
 from config import Config
@@ -49,7 +50,7 @@ prompt = prompt_template.invoke({"ToolMessage": '{"tool":"forwarded_response","a
 
 forwarding_tool = create_forward_message_tool("forwarded_response")
 
-graph = create_supervisor([news_agent, central_memory_agent], 
+graph = create_supervisor([news_agent, cms, search_agent], 
                         model=conf.model, 
                         supervisor_name='Ryo',
                         prompt=prompt,

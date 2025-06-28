@@ -26,7 +26,8 @@ Work in progress: shooting for a beta in 6 months.
 ✅ Testing LLM Components - LLM Local Connection, Tools <br>
 ✅ Setting up discord bot and connecting to local environment via API <br>
 ✅ Testing End-to-End integration User ↔️ Discord Bot (Connecting Locally to LLMs) <br>
-✅ Short Term and Long Term Memory established <br>
+✅ Central Memory Supervisor established <br>
+✅ Search Agent added <br>
 
 
 
