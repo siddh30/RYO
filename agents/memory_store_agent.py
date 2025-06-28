@@ -42,6 +42,7 @@ class MemoryResponse(BaseModel):
     date_logged: datetime = Field(description = "Logging the date and time you set this memory")
     remember_window: datetime = Field(description="Remember upto the provided minute, hour, day, week, month, year or permanently")
     remember_flag: str = Field(description= "Return exactly : Permanent or Not Permanent")
+    index_title: str = Field(description="Set an index name")
     AImessage : str = Field(description="Final AI Message reminding the user of the memory. Always mention the date in english")
     context: str = Field(description="The context you want to save")
 
@@ -212,13 +213,6 @@ def call_model(state: AgentState):
     return {"messages": [response]}
 
 
-## Define the function that calls the model
-def call_model(state: AgentState):
-    response = remember_model.invoke(state["messages"])
-    # We return a list, because this will get added to the existing list
-    return {"messages": [response]}
-
-
 # Define the function that responds to the user
 def respond(state: AgentState):
     permanent_memory = pd.DataFrame()
@@ -254,6 +248,7 @@ def respond(state: AgentState):
         path = permanent_path
         central_memory = permanent_memory
 
+    response.index_title = f"{response.remember_flag}: {response.index_title}"
     central_memory = pd.concat([central_memory, pd.DataFrame(response.model_dump(), index=[0])], ignore_index=True)
     central_memory.to_csv(path, index=False)
     return {"final_response": response, "messages": [ai_message]}
@@ -280,37 +275,21 @@ def should_continue(state: AgentState):
    
 
 
-# Define the function that determines whether to continue or not
-def should_continue(state: AgentState):
-    messages = state["messages"]
-    last_message = messages[-1]
-    # If there is only one tool call and it is the response tool call we respond to the user
-    if (
-        len(last_message.tool_calls) == 1
-        and last_message.tool_calls[0]["name"] == "MemoryResponse"
-    ):
-        return "respond"
-    # Otherwise we will use the tool node again
-    else:
-        return "continue"
-    
-
-
 # Define a new graph
 workflow = StateGraph(AgentState)
 
 # Define the two nodes we will cycle between
-workflow.add_node("Central Memory Agent", call_model)
+workflow.add_node("memory_store_agent", call_model)
 workflow.add_node("respond", respond)
 workflow.add_node("memory_tools", ToolNode(tools))
 
 # Set the entrypoint as `agent`
 # This means that this node is the first one called
-workflow.set_entry_point("Central Memory Agent")
+workflow.set_entry_point("memory_store_agent")
 
 # We now add a conditional edge
 workflow.add_conditional_edges(
-    "Central Memory Agent",
+    "memory_store_agent",
     should_continue,
     {
         "continue": "memory_tools",
@@ -318,12 +297,12 @@ workflow.add_conditional_edges(
     },
 )
 
-workflow.add_edge("memory_tools", "Central Memory Agent")
+workflow.add_edge("memory_tools", "memory_store_agent")
 workflow.add_edge("respond", END)
 
-central_memory_agent = workflow.compile()
-central_memory_agent.name = 'Central Memory Agent'
-central_memory_agent
+memory_store_agent = workflow.compile()
+memory_store_agent.name = 'memory_store_agent'
+memory_store_agent
     
 
 
@@ -331,17 +310,17 @@ central_memory_agent
 workflow = StateGraph(AgentState)
 
 # Define the two nodes we will cycle between
-workflow.add_node("central_memory_agent", call_model)
+workflow.add_node("memory_store_agent", call_model)
 workflow.add_node("respond", respond)
 workflow.add_node("memory_tools", ToolNode(tools))
 
 # Set the entrypoint as `agent`
 # This means that this node is the first one called
-workflow.set_entry_point("central_memory_agent")
+workflow.set_entry_point("memory_store_agent")
 
 # We now add a conditional edge
 workflow.add_conditional_edges(
-    "central_memory_agent",
+    "memory_store_agent",
     should_continue,
     {
         "continue": "memory_tools",
@@ -349,8 +328,9 @@ workflow.add_conditional_edges(
     },
 )
 
-workflow.add_edge("memory_tools", "central_memory_agent")
+workflow.add_edge("memory_tools", "memory_store_agent")
 workflow.add_edge("respond", END)
 
-central_memory_agent = workflow.compile()
-central_memory_agent.name = 'central_memory_agent'
+memory_store_agent = workflow.compile()
+memory_store_agent.name = 'memory_store_agent'
+

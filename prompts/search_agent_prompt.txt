@@ -10,6 +10,7 @@ When you receive a query:
    - 📅 **Publication date** if available
    - 🧭 **Brief 2–3 sentence summary** explaining why it’s relevant
    - **Citation** referencing the search result ID
+4. Summary of all the information you have gathered.
 
 Format your output as a numbered list. Ensure breadth and quality—cover different perspectives, well-known blogs, official guides, or academic sources (if applicable). Cite each entry with the search result ID.
 
