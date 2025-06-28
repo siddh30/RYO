@@ -3,6 +3,7 @@ conf = Config()
 
 ##### News Agent ###
 from agents.supervisor import ryo
+from agents.news_agent import news_agent
 
 ##### Connect to Discord #####
 import discord
@@ -26,9 +27,9 @@ class Client(discord.Client):
         
         async with message.channel.typing():
             result = ryo.invoke({"messages": [{"role": "user", "content":message.content.strip()}]},
-            conf.news_agent_configs)
-
+            conf.ryo_configs)
             await message.channel.send(result['messages'][-1].content) 
+        
 
 
 client = Client(intents=intents)
