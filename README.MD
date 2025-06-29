@@ -2,7 +2,7 @@
 
 A hierarchical multi-agent discord bot for helping promote work-life balance.
 
-<img src="images/Flowchart.png" width="1000" height="700" alt="Image description">
+<img src="images/Flowchart.png" width="800" height="600" alt="Image description">
 
 
 ## 🧠 Overview
