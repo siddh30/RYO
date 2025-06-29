@@ -1,6 +1,7 @@
 import os 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
+from langchain_community.utilities import OpenWeatherMapAPIWrapper
 
 ######### ENV #########
 from dotenv import load_dotenv
@@ -11,6 +12,7 @@ class Config():
 
     base_dir = '/Users/siddharth/Desktop/Data-Science-Universe/Projects/LLMS/Ryo'
     memory_path = f"{base_dir}/memory"
+    prompt_dir_path = f"{base_dir}/prompts"
 
     ########## SECRETS #################
     discord_token = os.getenv('DISCORD_TOKEN')
@@ -20,27 +22,33 @@ class Config():
     model = ChatOpenAI(model="gpt-4o")
 
 
+    ########### Supervisor ################
+    ryo_configs = {"configurable":{"thread_id":1}}
+    
+
 
     ################# NEWS AGENT ################
-
-    ### Name ###
     news_agent_name = 'news_agent'
-
-    ### Tools ###
     news_agent_tools = [TavilySearch(max_results=5,topic="news")]
+    news_agent_configs = {"configurable":{"thread_id":2}}
 
 
-    ### configurations ###
-    news_agent_configs = {"configurable":{"thread_id":1}}
+    ################# SEARCH AGENT #####################
+    search_agent_name = 'search_agent'
 
-    ryo_configs = {"configurable":{"thread_id":1}}
+    weather_tool = OpenWeatherMapAPIWrapper()
+    TavilySearch_tool = TavilySearch(max_results=5,topic="general")
 
-
-    #### Agent Prompt ###
-    news_agent_prompt = "You are a news reporter, please use all the given tools to provide the latest, most accurate news."
-
-
+    search_agent_tools =  [weather_tool.run, TavilySearch_tool]
     
+    search_agent_configs = {"configurable":{"thread_id":3}}
+
+
+ 
+ 
+
+
+   
 
 
 
