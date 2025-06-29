@@ -1,6 +1,7 @@
 import os 
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
+from langchain_community.utilities import OpenWeatherMapAPIWrapper
 
 ######### ENV #########
 from dotenv import load_dotenv
@@ -34,7 +35,12 @@ class Config():
 
     ################# SEARCH AGENT #####################
     search_agent_name = 'search_agent'
-    search_agent_tools =  [TavilySearch(max_results=5,topic="general")]
+
+    weather_tool = OpenWeatherMapAPIWrapper()
+    TavilySearch_tool = TavilySearch(max_results=5,topic="general")
+
+    search_agent_tools =  [weather_tool.run, TavilySearch_tool]
+    
     search_agent_configs = {"configurable":{"thread_id":3}}
 
 

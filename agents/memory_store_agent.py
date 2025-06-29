@@ -43,7 +43,7 @@ class MemoryResponse(BaseModel):
     remember_window: datetime = Field(description="Remember upto the provided minute, hour, day, week, month, year or permanently")
     remember_flag: str = Field(description= "Return exactly : Permanent or Not Permanent")
     index_title: str = Field(description="Set an index name")
-    AImessage : str = Field(description="Final AI Message reminding the user of the memory. Always mention the date in english")
+    AImessage : str = Field(description="Final AI Message reminding the user of the memory. Always mention the date in english. If a permanent memory don't say you remember permanently. That is understood.")
     context: str = Field(description="The context you want to save")
 
 
