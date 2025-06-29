@@ -2,6 +2,9 @@
 
 A hierarchical multi-agent discord bot for helping promote work-life balance.
 
+<img src="images/Flowchart.png" width="1000" height="700" alt="Image description">
+
+
 ## 🧠 Overview
 RYO is your autonomous life-balance partner that protects personal time from work chaos while actively tracking fitness, meal prep, news, and goals—ensuring you thrive in both short-term wins and long-term dreams. It automates the mundane (grocery restocking, workout scheduling) and curates the meaningful (personalized news, progress nudges), so your life flows beyond the 9-to-5 grind.
 
@@ -35,9 +38,8 @@ Work in progress: shooting for a beta in 6 months.
 <img src="images/Discord_UI.jpeg" width="400" height="800" alt="Image description">
 
 ### Ongoing Tasks
-⚙️ Delete Memories and Reminders once done <br>
-⚙️ Working on Pinging Components <br>
 ⚙️ Formalizing Design <br>
+⚙️ Working on Pinging Components <br>
 ⚙️ Finalizing Features <br>
 ⚙️ Developing and Optimizing Features <br>
 ⚙️ Strategizing Evaluation <br>

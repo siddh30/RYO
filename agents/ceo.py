@@ -22,7 +22,7 @@ resource_manager = ResourceManager.get_instance()
 
 
 
-prompt_blueprint = resource_manager.prompt_loader("supervisor_prompt")
+prompt_blueprint = resource_manager.prompt_loader("ceo_prompt")
 
 
 

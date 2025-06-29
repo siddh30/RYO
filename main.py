@@ -2,7 +2,7 @@ from config import Config
 conf = Config()
 
 ##### News Agent ###
-from agents.main_supervisor import ryo
+from agents.ceo import ryo
 from agents.news_agent import news_agent
 
 ##### Connect to Discord #####
