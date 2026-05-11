@@ -66,7 +66,7 @@ STATS_COMMANDS = (
     "`!addwebhook <event> <url>` — register an outbound webhook\n"
     "`!listwebhooks` — list all configured webhooks\n"
     "`!removewebhook <event>` — remove a webhook\n"
-    "`!clear-conversation` — delete all Ryo messages in a channel"
+    "`!clear-conversation` — delete all messages in a channel (owner only, <14 days)"
 )
 
 
@@ -179,6 +179,7 @@ class Client(discord.Client):
         self.reminder_loop.start()
         await self._init_stats_panels()
         await self._ensure_channel("ryo-travel", "✈️ Travel itineraries and trip planning with RYO.")
+        await self._ensure_channel("ryo-general", "💬 General chat with RYO — news, weather, reminders, memory.")
 
     async def _ensure_channel(self, name: str, topic: str):
         for guild in self.guilds:
@@ -355,17 +356,24 @@ class Client(discord.Client):
 
         channel_name = getattr(message.channel, "name", "")
 
-        # !clear-conversation — works in every channel
+        # !clear-conversation — owner only, deletes all messages in channel (<14 days)
         if message.content.strip() == "!clear-conversation":
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can clear conversations.")
+                return
             try:
                 await message.delete()
             except discord.Forbidden:
                 pass
-            deleted = await message.channel.purge(
-                limit=200, check=lambda m: m.author == self.user
+            deleted = await message.channel.purge(limit=100)
+            confirm = await message.channel.send(
+                f"🧹 Cleared **{len(deleted)}** message(s).\n"
+                f"-# For messages older than 14 days use **Undiscord** — github.com/victornpb/undiscord"
             )
-            confirm = await message.channel.send(f"🧹 Cleared **{len(deleted)}** message(s).")
-            await confirm.delete(delay=4)
+            await confirm.delete(delay=8)
+            # Restore stats dashboard if this is ryo-stats
+            if channel_name == "ryo-stats" and message.guild:
+                await self._init_stats_panels()
             return
 
         # ryo-stats: only cost/webhook commands allowed
@@ -374,7 +382,7 @@ class Client(discord.Client):
                 if message.guild:
                     await self._update_stats_panel(message.guild)
             elif not message.content.strip().startswith("!"):
-                await message.channel.send("📊 This channel shows cost diagnostics only. Chat with Ryo in **#general**!")
+                await message.channel.send("📊 This channel shows cost diagnostics only. Chat with Ryo in **#ryo-general**!")
             # fall through so !setcredits / !addwebhook etc. are handled below
             else:
                 pass  # handled by the command blocks below
@@ -463,6 +471,10 @@ class Client(discord.Client):
             await self._update_stats_panel(message.guild)
 
     def _get_general_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
+        # Prefer the dedicated ryo-general channel, fall back to any non-specialised channel
+        preferred = discord.utils.get(guild.text_channels, name="ryo-general")
+        if preferred and guild.me.permissions_in(preferred).send_messages:
+            return preferred
         specialized = {"ryo-stats", "ryo-travel"}
         for ch in guild.text_channels:
             if ch.name not in specialized and guild.me.permissions_in(ch).send_messages:
