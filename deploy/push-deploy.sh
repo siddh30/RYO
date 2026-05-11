@@ -16,7 +16,7 @@ git diff --cached --quiet && echo "Nothing to commit, skipping." || git commit -
 git push origin main
 
 echo "==> Deploying to server..."
-ssh -i "$SSH_KEY" "$SERVER" "cd $REPO && git pull && sudo systemctl restart ryo"
+ssh -i "$SSH_KEY" "$SERVER" "cd $REPO && git fetch origin && git reset --hard origin/main && sudo systemctl restart ryo"
 
 echo "==> Done. Tailing logs (Ctrl+C to exit)..."
 ssh -i "$SSH_KEY" "$SERVER" "sudo journalctl -u ryo -f --no-pager"
