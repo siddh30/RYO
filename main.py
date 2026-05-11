@@ -487,6 +487,10 @@ class Client(discord.Client):
 
         channel_name = getattr(message.channel, "name", "")
 
+        # ryo-logs is write-only — never respond to messages there
+        if channel_name == "ryo-logs":
+            return
+
         # !clear — owner only, works in any channel
         if message.content.strip() == "!clear":
             if str(message.author.id) != conf.owner_discord_id:
@@ -657,6 +661,8 @@ class Client(discord.Client):
             cost_db.save(cost_info)
             _totals = cost_db.load()
             await self._check_low_credit()
+            if message.guild:
+                await self._post_log(message.guild, channel_name, display_name, message.content.strip(), cost_info)
 
         if message.guild:
             await self._update_stats_panel(message.guild)
@@ -665,11 +671,53 @@ class Client(discord.Client):
         preferred = discord.utils.get(guild.text_channels, name="ryo-general")
         if preferred and guild.me.permissions_in(preferred).send_messages:
             return preferred
-        specialized = {"ryo-stats", "ryo-travel"}
+        specialized = {"ryo-stats", "ryo-travel", "ryo-logs"}
         for ch in guild.text_channels:
             if ch.name not in specialized and guild.me.permissions_in(ch).send_messages:
                 return ch
         return None
+
+    def _get_logs_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
+        ch = discord.utils.get(guild.text_channels, name="ryo-logs")
+        return ch if ch and guild.me.permissions_in(ch).send_messages else None
+
+    async def _post_log(
+        self,
+        guild: discord.Guild,
+        channel_name: str,
+        display_name: str,
+        user_msg: str,
+        cost_info: dict,
+    ):
+        logs = self._get_logs_channel(guild)
+        if not logs:
+            return
+        duration_s = cost_info.get("duration_ms", 0) / 1000
+        cost_usd = cost_info.get("total_cost_usd", 0.0)
+        tokens_in = cost_info.get("input_tokens", 0)
+        tokens_out = cost_info.get("output_tokens", 0)
+        cache_read = cost_info.get("cache_read_tokens", 0)
+        turns = cost_info.get("num_turns", 0)
+        truncated = user_msg[:200] + "…" if len(user_msg) > 200 else user_msg
+        cache_str = f"  ·  ♻️ {cache_read:,} cached" if cache_read else ""
+        e = discord.Embed(color=0x2B2D31)
+        e.add_field(name="Channel", value=f"#{channel_name}", inline=True)
+        e.add_field(name="User", value=display_name, inline=True)
+        e.add_field(name="Turns", value=str(turns), inline=True)
+        e.add_field(name="Message", value=f"```{truncated}```", inline=False)
+        e.add_field(
+            name="Cost",
+            value=(
+                f"💰 **${cost_usd:.4f}**  ·  ⏱️ **{duration_s:.1f}s**\n"
+                f"📥 {tokens_in:,} in  ·  📤 {tokens_out:,} out{cache_str}"
+            ),
+            inline=False,
+        )
+        e.timestamp = datetime.now()
+        try:
+            await logs.send(embed=e)
+        except Exception:
+            pass
 
     async def _handle_plan_trip(self, message: discord.Message, discord_id: str, display_name: str):
         raw = re.sub(r'^!plan-trip\s+', '', message.content.strip(), flags=re.IGNORECASE)
@@ -686,7 +734,7 @@ class Client(discord.Client):
 
         days = (end_date - start_date).days + 1
         status_msg = await message.channel.send(
-            f"✈️ Planning your **{days}-day {destination}** trip… this may take a moment!"
+            f"✈️ Planning your **{days}-day {destination}** trip — researching deals & card benefits first… this may take a moment!"
         )
 
         prefs = _get_all_travel_prefs()
@@ -785,6 +833,8 @@ class Client(discord.Client):
             cost_db.save(cost_info)
             _totals = cost_db.load()
             await self._check_low_credit()
+            if guild:
+                await self._post_log(guild, "ryo-travel", display_name, f"!plan-trip {destination}", cost_info)
 
         if guild:
             await self._update_stats_panel(guild)

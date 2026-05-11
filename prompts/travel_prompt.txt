@@ -64,7 +64,9 @@ Use **travel-deals-agent** skill for:
 - Flight prices, hotel deals, cheapest options
 - Credit card benefits, travel credits, cash back, points/miles for a trip
 - "Which card should I use?", "What's the cheapest way to get there?"
-- Automatically at the end of every itinerary — append a **💳 Deals & Credits** section
+- **For every !plan-trip itinerary: call travel-deals-agent FIRST**, before writing the plan.
+  Use the findings (cheapest flights, hotel deals, card benefits) to inform your hotel picks,
+  budget breakdown, and tips. Then include a **💳 Deals & Credits** section at the end.
 
 Use **search-agent** skill for:
 - Visa requirements, entry rules
