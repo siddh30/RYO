@@ -67,7 +67,7 @@ async def extract_trip_events(itinerary_text: str, destination: str, start_date:
 
 
 def event_title(destination: str, day: int, title: str) -> str:
-    return f"{destination}: Day {day} — {title}"
+    return f"{destination} · Day {day} — {title}"
 
 
 async def get_existing_event_names(guild: discord.Guild) -> dict[str, discord.ScheduledEvent]:

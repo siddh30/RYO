@@ -2,7 +2,7 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from dateutil import parser as dateparser
 
@@ -169,6 +169,9 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
                 "`!plan-trip <destination> <start> to <end> [description]`\n"
                 "    ↳ itinerary · deals & card benefits · Discord events · reminders\n"
                 "    ↳ e.g. `!plan-trip Tokyo June 1 to June 7 staying at Park Hyatt`\n"
+                "`!edit-event <partial name> <field> <value>` — edit a scheduled event\n"
+                "    ↳ fields: `title` · `date` · `location` · `description`\n"
+                "    ↳ e.g. `!edit-event Day 3 date 2026-05-22`\n"
                 "🔒 `!clear-events` — delete all scheduled events\n"
                 "🔒 `!clear` — clear all messages"
             ),
@@ -623,6 +626,11 @@ class Client(discord.Client):
             await message.channel.send(f"🗑️ Deleted **{count}** scheduled event(s).")
             return
 
+        # !edit-event — ryo-travel only
+        if channel_name == "ryo-travel" and message.content.strip().startswith("!edit-event"):
+            await self._handle_edit_event(message)
+            return
+
         # Pending duplicate-event confirmation
         if channel_name == "ryo-travel" and message.channel.id in _pending_trip_events:
             await self._handle_event_confirm_reply(message)
@@ -798,6 +806,10 @@ class Client(discord.Client):
             )
             return
 
+        # Guard against garbage like "Place: New Orleans, Dates :" leaking in from itinerary formatting
+        destination = re.sub(r'\b(?:place|dates?|location)\s*:?\s*', '', destination, flags=re.IGNORECASE).strip()
+        destination = destination.split(',')[0].strip().strip('.:')
+
         days = (end_date - start_date).days + 1
         status_msg = await message.channel.send(
             f"✈️ Planning your **{days}-day {destination}** trip — researching deals & card benefits first… this may take a moment!"
@@ -933,6 +945,81 @@ class Client(discord.Client):
             _pending_trip_events[channel_id] = pending
             await message.channel.send("Reply `yes` to replace duplicates or `no` to skip them.")
 
+
+    async def _handle_edit_event(self, message: discord.Message):
+        """
+        !edit-event <partial_name> <field> <value>
+        Fields: title, date (YYYY-MM-DD), location, description
+        Example: !edit-event "Day 3" date 2026-05-22
+        """
+        if not message.guild:
+            return
+        raw = re.sub(r'^!edit-event\s*', '', message.content.strip(), flags=re.IGNORECASE).strip()
+        if not raw:
+            await message.channel.send(
+                "**Usage:** `!edit-event <partial name> <field> <new value>`\n"
+                "**Fields:** `title` · `date` (YYYY-MM-DD) · `location` · `description`\n"
+                "**Example:** `!edit-event Day 3 date 2026-05-22`"
+            )
+            return
+
+        # Split into: everything up to the field keyword, then field, then rest
+        field_re = re.compile(r'\b(title|date|location|description)\b', re.IGNORECASE)
+        m = field_re.search(raw)
+        if not m:
+            await message.channel.send(
+                "Specify a field to edit: `title`, `date`, `location`, or `description`.\n"
+                "Example: `!edit-event New Orleans Day 2 date 2026-05-20`"
+            )
+            return
+
+        partial_name = raw[:m.start()].strip().strip('"\'')
+        field = m.group(1).lower()
+        new_value = raw[m.end():].strip().strip('"\'')
+
+        if not partial_name or not new_value:
+            await message.channel.send(
+                "Need both a partial event name and a new value.\n"
+                "Example: `!edit-event Day 3 date 2026-05-22`"
+            )
+            return
+
+        try:
+            events = await message.guild.fetch_scheduled_events()
+        except Exception as e:
+            await message.channel.send(f"⚠️ Couldn't fetch events: {e}")
+            return
+
+        matches = [ev for ev in events if partial_name.lower() in ev.name.lower()]
+        if not matches:
+            await message.channel.send(f"No events found matching **{partial_name}**.")
+            return
+        if len(matches) > 3:
+            names = "\n".join(f"• {ev.name}" for ev in matches[:5])
+            await message.channel.send(
+                f"Too many matches ({len(matches)}) for **{partial_name}** — be more specific:\n{names}"
+            )
+            return
+
+        event = matches[0]
+        try:
+            if field == "title":
+                await event.edit(name=new_value)
+            elif field == "date":
+                new_dt = datetime.fromisoformat(new_value).replace(tzinfo=timezone.utc)
+                start = new_dt.replace(hour=9, minute=0)
+                end = new_dt.replace(hour=22, minute=0)
+                await event.edit(start_time=start, end_time=end)
+            elif field == "location":
+                await event.edit(location=new_value)
+            elif field == "description":
+                await event.edit(description=new_value)
+
+            await message.channel.send(
+                f"✅ Updated **{event.name}** — `{field}` → `{new_value}`"
+            )
+        except Exception as e:
+            await message.channel.send(f"⚠️ Couldn't edit event: {e}")
 
     async def _check_low_credit(self):
         balance = _totals.get("credit_balance_usd")
