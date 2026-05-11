@@ -243,29 +243,48 @@ def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None, 
     """
     Parse trip command text → (destination, start_date, end_date, extra_context).
     Handles multi-word destinations, natural language dates, 'to/through/until' separators,
-    and any trailing description/notes after the end date.
+    trailing description/notes, and parenthetical content (e.g. hotel addresses).
 
     Examples:
       'New Orleans 19th May to 24th May'
+      'New Orleans for 19th May to 24th May. Staying Virgin Hotel (550 Baronne St)'
       'Tokyo June 1 to June 7 2026 focus on street food and anime'
       'Paris 2026-06-01 2026-06-07, romantic trip, budget €200/day'
     """
-    halves = re.split(r'\s+(?:to|through|until|[-–→])\s+', text, maxsplit=1, flags=re.IGNORECASE)
+    # Pull out parenthetical content (e.g. hotel addresses) — keep as extra context,
+    # but don't let complex address tokens confuse the date parser.
+    paren_extras = re.findall(r'\([^)]+\)', text)
+    text_clean = re.sub(r'\([^)]+\)', '', text).strip()
+
+    halves = re.split(r'\s+(?:to|through|until|[-–→])\s+', text_clean, maxsplit=1, flags=re.IGNORECASE)
 
     try:
         if len(halves) == 2:
             first, second = halves
             start_dt, start_tokens = dateparser.parse(first, fuzzy_with_tokens=True, dayfirst=False)
-            destination = ' '.join(t.strip(',- ') for t in start_tokens if t.strip(',- '))
+            destination_raw = ' '.join(t.strip(',- ') for t in start_tokens if t.strip(',- '))
+            # Strip trailing prepositions left over from patterns like "New Orleans for 19th May"
+            destination = re.sub(r'\s+\b(?:for|in|at|on)\b\s*$', '', destination_raw, flags=re.IGNORECASE).strip()
 
-            # Extract end date + any trailing description from the second half
-            end_dt, end_tokens = dateparser.parse(second, fuzzy_with_tokens=True, dayfirst=False, default=start_dt)
-            extra = ' '.join(t.strip(',- ') for t in end_tokens if t.strip(',- '))
+            # Separate the end-date from any description that follows
+            # e.g. "24th May. staying at Virgin Hotel" or "24th May budget €200"
+            # Split on: period/! followed by whitespace, OR two or more spaces
+            m = re.search(r'[.!]\s+|\s{2,}', second)
+            if m:
+                second_date_str = second[:m.start()]
+                extra_suffix = second[m.end():].strip('.! ')
+            else:
+                second_date_str = second
+                extra_suffix = ''
 
-            return destination.strip(), start_dt, end_dt, extra.strip()
+            end_dt, end_tokens = dateparser.parse(second_date_str, fuzzy_with_tokens=True, dayfirst=False, default=start_dt)
+            extra_from_tokens = ' '.join(t.strip(',- ') for t in end_tokens if t.strip(',- '))
+            extra = ' '.join(p for p in [extra_from_tokens, extra_suffix] + paren_extras if p).strip()
+
+            return destination, start_dt, end_dt, extra
 
         # Fallback: 'Destination YYYY-MM-DD YYYY-MM-DD [extra text]'
-        parts = text.split()
+        parts = text_clean.split()
         if len(parts) >= 3:
             destination = parts[0]
             start_dt = dateparser.parse(parts[1], dayfirst=False)
@@ -671,7 +690,8 @@ class Client(discord.Client):
             await message.channel.send(
                 "Couldn't figure out the destination or dates. Try:\n"
                 "`!plan-trip New Orleans 19th May to 24th May`\n"
-                "`!plan-trip Tokyo June 1 2026 to June 7 2026`"
+                "`!plan-trip Tokyo June 1 2026 to June 7 2026`\n"
+                "You can add any description after the dates — hotel info, budget, preferences, etc."
             )
             return
 
