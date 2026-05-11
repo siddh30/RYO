@@ -13,7 +13,7 @@ MSG="${1:-update}"
 echo "==> Committing and pushing..."
 git add -A
 git diff --cached --quiet && echo "Nothing to commit, skipping." || git commit -m "$MSG"
-git push origin pilot
+git push origin main
 
 echo "==> Deploying to server..."
 ssh -i "$SSH_KEY" "$SERVER" "cd $REPO && git pull && sudo systemctl restart ryo"
