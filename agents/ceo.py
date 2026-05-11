@@ -6,9 +6,15 @@ from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 from utils.resource_manager import ResourceManager
 
 
-async def run_ceo(user_message: str, discord_id: str, display_name: str) -> tuple[str, dict]:
+CHANNEL_PROMPTS = {
+    "travel": "travel_prompt",
+}
+
+
+async def run_ceo(user_message: str, discord_id: str, display_name: str, channel_type: str = "general") -> tuple[str, dict]:
     rm = ResourceManager.get_instance()
-    base_prompt = rm.prompt_loader("ceo_prompt")
+    prompt_name = CHANNEL_PROMPTS.get(channel_type, "ceo_prompt")
+    base_prompt = rm.prompt_loader(prompt_name)
 
     user_context = (
         f"\n<CurrentUser>\n"

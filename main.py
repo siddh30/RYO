@@ -194,6 +194,16 @@ class Client(discord.Client):
         print(f"Logged on as {self.user}!")
         self.reminder_loop.start()
         await self._init_stats_panels()
+        await self._ensure_channel("ryo-travel", "✈️ Travel itineraries and trip planning with RYO.")
+
+    async def _ensure_channel(self, name: str, topic: str):
+        for guild in self.guilds:
+            if not discord.utils.get(guild.text_channels, name=name):
+                try:
+                    await guild.create_text_channel(name, topic=topic)
+                    print(f"Created #{name} in {guild.name}")
+                except discord.Forbidden:
+                    print(f"Missing permission to create #{name} in {guild.name}")
 
     async def _init_stats_panels(self):
         for guild in self.guilds:
@@ -359,6 +369,14 @@ class Client(discord.Client):
                     await message.channel.send("Usage: `!setcredits 28.35`")
                     return
 
+        channel_name = getattr(message.channel, "name", "")
+
+        # ryo-stats: only cost/webhook commands are allowed
+        if channel_name == "ryo-stats":
+            if not message.content.strip().startswith("!"):
+                await message.channel.send("📊 This channel is for cost diagnostics only. Ask Ryo in any other channel!")
+            return
+
         discord_id = str(message.author.id)
         display_name = message.author.display_name
         username = message.author.name
@@ -368,12 +386,36 @@ class Client(discord.Client):
             print(f"New user registered: {display_name} ({discord_id})")
             await dispatch("new_user", {"discord_id": discord_id, "display_name": display_name})
 
+        channel_type = "travel" if channel_name == "ryo-travel" else "general"
+
         async with message.channel.typing():
             response, cost_info = await run_ceo(
                 user_message=message.content.strip(),
                 discord_id=discord_id,
                 display_name=display_name,
+                channel_type=channel_type,
             )
+
+        # Off-topic routing: specialized channel detected it's not relevant
+        if response.startswith("<<ROUTE:general>>"):
+            redirect_msg = response.replace("<<ROUTE:general>>", "").strip()
+            await message.channel.send(_sanitize(redirect_msg))
+            # Re-run in the general channel and post answer there
+            if message.guild:
+                general = self._get_general_channel(message.guild)
+                if general:
+                    async with general.typing():
+                        gen_response, cost_info = await run_ceo(
+                            user_message=message.content.strip(),
+                            discord_id=discord_id,
+                            display_name=display_name,
+                            channel_type="general",
+                        )
+                    for chunk in _chunk(_sanitize(gen_response)):
+                        await general.send(f"↩️ *Redirected from #{channel_name}*\n{chunk}")
+        else:
+            for chunk in _chunk(_sanitize(response)):
+                await message.channel.send(chunk)
 
         if cost_info:
             _last_cost = cost_info
@@ -390,11 +432,15 @@ class Client(discord.Client):
                 "duration_ms": cost_info["duration_ms"],
             })
 
-        for chunk in _chunk(_sanitize(response)):
-            await message.channel.send(chunk)
-
         if message.guild:
             await self._update_stats_panel(message.guild)
+
+    def _get_general_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
+        specialized = {"ryo-stats", "ryo-travel"}
+        for ch in guild.text_channels:
+            if ch.name not in specialized and guild.me.permissions_in(ch).send_messages:
+                return ch
+        return None
 
     async def _check_low_credit(self):
         balance = _totals.get("credit_balance_usd")
