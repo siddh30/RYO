@@ -692,24 +692,52 @@ class Client(discord.Client):
         logs = self._get_logs_channel(guild)
         if not logs:
             return
+
         duration_s = cost_info.get("duration_ms", 0) / 1000
         cost_usd = cost_info.get("total_cost_usd", 0.0)
         tokens_in = cost_info.get("input_tokens", 0)
         tokens_out = cost_info.get("output_tokens", 0)
         cache_read = cost_info.get("cache_read_tokens", 0)
         turns = cost_info.get("num_turns", 0)
+        is_error = cost_info.get("is_error", False)
+        tool_calls: list[dict] = cost_info.get("tool_calls", [])
+
+        color = 0xED4245 if is_error else 0x2B2D31
         truncated = user_msg[:200] + "…" if len(user_msg) > 200 else user_msg
-        cache_str = f"  ·  ♻️ {cache_read:,} cached" if cache_read else ""
-        e = discord.Embed(color=0x2B2D31)
+
+        e = discord.Embed(color=color)
         e.add_field(name="Channel", value=f"#{channel_name}", inline=True)
         e.add_field(name="User", value=display_name, inline=True)
         e.add_field(name="Turns", value=str(turns), inline=True)
         e.add_field(name="Message", value=f"```{truncated}```", inline=False)
+
+        if tool_calls:
+            lines = []
+            for tc in tool_calls:
+                name = tc["name"]
+                summary = tc["summary"]
+                if name == "Skill":
+                    lines.append(f"🔧 **Skill** → `{summary}`")
+                elif name == "Bash":
+                    lines.append(f"💻 **Bash** `{summary}`")
+                elif name == "WebSearch":
+                    lines.append(f"🔍 **Search** `{summary}`")
+                elif name == "WebFetch":
+                    lines.append(f"🌐 **Fetch** `{summary}`")
+                elif name in ("Read", "Write", "Edit"):
+                    lines.append(f"📄 **{name}** `{summary}`")
+                else:
+                    lines.append(f"⚙️ **{name}** `{summary}`")
+            tool_str = "\n".join(lines[:20])  # cap at 20 to stay within embed limits
+            e.add_field(name="Tool Calls", value=tool_str, inline=False)
+
+        cache_str = f"  ·  ♻️ {cache_read:,} cached" if cache_read else ""
         e.add_field(
-            name="Cost",
+            name="Telemetry",
             value=(
                 f"💰 **${cost_usd:.4f}**  ·  ⏱️ **{duration_s:.1f}s**\n"
                 f"📥 {tokens_in:,} in  ·  📤 {tokens_out:,} out{cache_str}"
+                + ("  ·  ❌ error" if is_error else "")
             ),
             inline=False,
         )
