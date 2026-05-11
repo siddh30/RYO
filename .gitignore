@@ -3,9 +3,10 @@
 *.key
 *.pem
 
-# Claude Code local config (personal settings, not project config)
+# Claude Code — local config and instructions
 .claude/settings.local.json
 .claude/projects/
+CLAUDE.md
 
 # Session / deploy notes with server details
 SESSION.md
