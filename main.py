@@ -260,20 +260,31 @@ def _clear_channel_session(channel_id: int):
     conn.close()
 
 
+# Regex to extract a date at the very start of a string, stopping before non-date content.
+# Handles: "24th May", "May 24th 2026", "June 7 2026", "2026-06-07", "05/24/2026"
+_DATE_PREFIX_RE = re.compile(
+    r'^(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\w*(?:\s+\d{2,4})?'
+    r'|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\w*\s+\d{1,2}(?:st|nd|rd|th)?(?:\s+\d{2,4})?'
+    r'|\d{4}-\d{2}-\d{2}'
+    r'|\d{1,2}/\d{1,2}(?:/\d{2,4})?)',
+    re.IGNORECASE,
+)
+
+
 def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None, str]:
     """
     Parse trip command text → (destination, start_date, end_date, extra_context).
     Handles multi-word destinations, natural language dates, 'to/through/until' separators,
-    trailing description/notes, and parenthetical content (e.g. hotel addresses).
+    trailing description/notes, parenthetical content, and inline hotel/address text.
 
     Examples:
       'New Orleans 19th May to 24th May'
+      'New Orleans 19th May to 24th May Hotel - Virgin Hotel 550 Baronne St, New Orleans LA US'
       'New Orleans for 19th May to 24th May. Staying Virgin Hotel (550 Baronne St)'
       'Tokyo June 1 to June 7 2026 focus on street food and anime'
       'Paris 2026-06-01 2026-06-07, romantic trip, budget €200/day'
     """
-    # Pull out parenthetical content (e.g. hotel addresses) — keep as extra context,
-    # but don't let complex address tokens confuse the date parser.
+    # Pull out parenthetical content — keep as extra, but don't let addresses confuse the parser.
     paren_extras = re.findall(r'\([^)]+\)', text)
     text_clean = re.sub(r'\([^)]+\)', '', text).strip()
 
@@ -284,16 +295,24 @@ def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None, 
             first, second = halves
             start_dt, start_tokens = dateparser.parse(first, fuzzy_with_tokens=True, dayfirst=False)
             destination_raw = ' '.join(t.strip(',- ') for t in start_tokens if t.strip(',- '))
-            # Strip trailing prepositions left over from patterns like "New Orleans for 19th May"
+            # Strip trailing prepositions left over from "New Orleans for 19th May"
             destination = re.sub(r'\s+\b(?:for|in|at|on)\b\s*$', '', destination_raw, flags=re.IGNORECASE).strip()
 
-            # Separate the end-date from any description that follows
-            # e.g. "24th May. staying at Virgin Hotel" or "24th May budget €200"
-            # Split on: period/! followed by whitespace, OR two or more spaces
-            m = re.search(r'[.!]\s+|\s{2,}', second)
-            if m:
-                second_date_str = second[:m.start()]
-                extra_suffix = second[m.end():].strip('.! ')
+            # Extract end date from the start of 'second'; treat the rest as description.
+            # Use _DATE_PREFIX_RE first so addresses/postcodes after the date don't break parsing.
+            m_date = _DATE_PREFIX_RE.match(second.strip())
+            if m_date:
+                second_date_str = m_date.group(1)
+                extra_suffix = second[m_date.end():].strip(' .,!-')
+                end_dt = dateparser.parse(second_date_str, dayfirst=False, default=start_dt)
+                extra = ' '.join(p for p in [extra_suffix] + paren_extras if p).strip()
+                return destination, start_dt, end_dt, extra
+
+            # Fallback: split on sentence boundary or double space, then fuzzy-parse
+            m_split = re.search(r'[.!]\s+|\s{2,}', second)
+            if m_split:
+                second_date_str = second[:m_split.start()]
+                extra_suffix = second[m_split.end():].strip('.! ')
             else:
                 second_date_str = second
                 extra_suffix = ''
@@ -301,7 +320,6 @@ def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None, 
             end_dt, end_tokens = dateparser.parse(second_date_str, fuzzy_with_tokens=True, dayfirst=False, default=start_dt)
             extra_from_tokens = ' '.join(t.strip(',- ') for t in end_tokens if t.strip(',- '))
             extra = ' '.join(p for p in [extra_from_tokens, extra_suffix] + paren_extras if p).strip()
-
             return destination, start_dt, end_dt, extra
 
         # Fallback: 'Destination YYYY-MM-DD YYYY-MM-DD [extra text]'
