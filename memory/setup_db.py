@@ -103,16 +103,6 @@ def main():
     add_column_if_missing(conn, "reminders", "snooze_interval_mins", "INTEGER DEFAULT 30")
     add_column_if_missing(conn, "cost_tracking", "low_credit_alerted", "INTEGER DEFAULT 0")
 
-    conn.executescript("""
-    CREATE TABLE IF NOT EXISTS webhooks (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        event      TEXT NOT NULL,
-        url        TEXT NOT NULL,
-        label      TEXT,
-        UNIQUE(event, url)
-    );
-    """)
-
     p = migrate_csv(conn, PERMANENT_CSV, "permanent_memories")
     r = migrate_csv(conn, REMINDERS_CSV, "reminders")
 

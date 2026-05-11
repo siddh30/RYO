@@ -16,7 +16,6 @@ from agents.trip_planner import (
 )
 from memory.register_user import register_user
 from memory import cost_db
-from utils.webhook_dispatch import dispatch, add_webhook, remove_webhook, list_webhooks
 
 import discord
 from discord.ext import tasks
@@ -28,13 +27,12 @@ BILLING_URL = "https://platform.claude.com/settings/billing"
 intents = discord.Intents.default()
 intents.message_content = True
 
-# Loaded from DB on startup; updated in-memory and persisted after every message
 _totals: dict = {}
 _last_cost: dict = {}
 _session_messages: int = 0
-_stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [status, credits, last_msg, alltime]
-_channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persistent actions embed
-_pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire reply
+_stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [embed messages]
+_channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persistent dashboard
+_pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire
 
 
 def _sanitize(text: str) -> str:
@@ -67,17 +65,14 @@ def _bar(ratio: float, width: int = 16) -> str:
 
 
 STATS_COMMANDS = (
-    "`!refresh` — force-refresh this dashboard\n"
-    "`!setcredits <amount>` — update your credit balance\n"
-    "`!addwebhook <event> <url>` — register an outbound webhook\n"
-    "`!listwebhooks` — list all configured webhooks\n"
-    "`!removewebhook <event>` — remove a webhook\n"
-    "`!clear` — delete all messages in a channel (owner only, <14 days)"
+    "`!refresh` — refresh this dashboard\n"
+    "🔒 `!setcredits <amount>` — set your credit balance\n"
+    "🔒 `!clear` — clear messages in this channel\n"
+    "-# 🔒 = owner only"
 )
 
 
 def _embed_credits_dashboard() -> discord.Embed:
-    """Single credits dashboard for #ryo-stats."""
     balance = _totals.get("credit_balance_usd")
     spent = _totals.get("total_cost_usd", 0.0)
     total_msgs = _totals.get("total_messages", 0)
@@ -95,7 +90,7 @@ def _embed_credits_dashboard() -> discord.Embed:
         )
     else:
         color = 0x99AAB5
-        desc = f"No balance set.\n[Check billing]({BILLING_URL})"
+        desc = f"No balance set — use `!setcredits <amount>` to start tracking.\n[Check billing]({BILLING_URL})"
 
     e = discord.Embed(title="💳  Credits Remaining", description=desc, color=color)
     e.add_field(name="⌨️ Commands", value=STATS_COMMANDS, inline=False)
@@ -109,63 +104,79 @@ def _all_embeds() -> list[discord.Embed]:
     return [_embed_credits_dashboard()]
 
 
+_DASHBOARD_KEYWORDS = ("Travel Planner", "RYO — Chat", "Available Actions")
+
+
 def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
-    """Return a persistent actions embed for a given channel, or None for ryo-stats (handled separately)."""
+    """Return persistent actions embed for a channel. Returns None for ryo-stats (handled separately)."""
     if channel_name == "ryo-stats":
         return None
 
     if channel_name == "ryo-travel":
         e = discord.Embed(
-            title="✈️  Travel Channel — Available Actions",
+            title="✈️  Travel Planner",
+            description="Plan trips, build itineraries, and explore the world.",
             color=0x1DA1F2,
         )
         e.add_field(
-            name="Commands",
+            name="💬 Just ask",
             value=(
-                "`!travel-preferences` — view your travel profile\n"
-                "`!travel-preferences update` — update preferences\n"
-                "`!plan-trip <destination> <YYYY-MM-DD> <YYYY-MM-DD>` — full itinerary + Discord events + reminders\n"
-                "`!clear` — clear all messages in this channel"
+                "*\"Plan a 5-day trip to Kyoto\"*\n"
+                "*\"What should I pack for Bali in July?\"*\n"
+                "*\"Best restaurants in Paris under €30?\"*"
             ),
             inline=False,
         )
         e.add_field(
-            name="Tips",
+            name="⌨️ Commands",
             value=(
-                "📸 Attach an image or PDF and ask a question — Ryo can analyse it\n"
-                "Off-topic messages are automatically answered in **#ryo-general**"
+                "`!travel-preferences` — view your travel profile\n"
+                "`!travel-preferences update` — update saved preferences\n"
+                "`!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>`\n"
+                "    ↳ full itinerary + Discord events + pre-trip reminders\n"
+                "🔒 `!clear` — clear all messages"
             ),
             inline=False,
         )
-        e.set_footer(text="Both you and your travel partner should run !travel-preferences before planning a trip")
+        e.add_field(
+            name="💡 Tips",
+            value=(
+                "📸 Attach an image or PDF and ask a question — Ryo can analyse it\n"
+                "↩️ Off-topic messages are automatically answered in **#ryo-general**\n"
+                "-# 🔒 = owner only"
+            ),
+            inline=False,
+        )
+        e.set_footer(text="Both travellers should run !travel-preferences before planning a trip together")
         return e
 
     # ryo-general and any other channel
     e = discord.Embed(
-        title="🌀  RYO — Available Actions",
+        title="🌀  RYO — Chat Naturally",
+        description="No commands needed — just talk. Ryo figures out the rest.",
         color=0x57F287,
     )
     e.add_field(
-        name="Just talk naturally",
+        name="💬 What you can ask",
         value=(
-            "📰 News — *\"What's in the news?\"*\n"
-            "🌤️ Weather — *\"Weather in Tokyo?\"*\n"
-            "🔍 Search — *\"Look up X\"*\n"
-            "🧠 Remember — *\"Remember that I'm a VP at JPMorgan\"*\n"
-            "🗑️ Forget — *\"Forget my address\"*\n"
-            "⏰ Remind — *\"Remind me at 3pm\"* / *\"Remind me 3 times every 10 min\"*"
+            "📰 *\"What's in the news?\"*\n"
+            "🌤️ *\"Weather in Tokyo?\"*\n"
+            "🔍 *\"Look up X\"* / *\"Find info on Y\"*\n"
+            "🧠 *\"Remember I'm a VP at JPMorgan\"*\n"
+            "🗑️ *\"Forget my address\"*\n"
+            "⏰ *\"Remind me at 3pm\"* / *\"Remind me 3 times every 10 min\"*"
         ),
         inline=False,
     )
     e.add_field(
-        name="Commands",
+        name="⌨️ Commands",
         value=(
-            "`!clear` — clear all messages in this channel\n"
-            "📸 Attach an image or PDF — Ryo can analyse it"
+            "📸 Attach an image or PDF — Ryo can analyse it\n"
+            "🔒 `!clear` — clear all messages\n"
+            "-# 🔒 = owner only"
         ),
         inline=False,
     )
-    e.set_footer(text="Owner-only: !setcredits · !addwebhook · !listwebhooks · !removewebhook (use in #ryo-stats)")
     return e
 
 
@@ -180,13 +191,6 @@ TRAVEL_PREF_QUESTIONNAIRE = """✈️ Let's set up your travel profile! Reply wi
 **7.** 🥗 Dietary restrictions *(none / vegetarian / vegan / halal / other)*
 
 Reply with numbered answers and I'll save them to your profile!"""
-
-TRAVEL_COMMANDS = (
-    "`!travel-preferences` — view or set up your travel profile\n"
-    "`!travel-preferences update` — update your saved preferences\n"
-    "`!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>` — full itinerary + Discord events + reminders\n"
-    "📸 Attach any image and ask a question — Ryo can see it"
-)
 
 
 def _get_travel_preferences(discord_id: str) -> str | None:
@@ -251,7 +255,6 @@ class Client(discord.Client):
         await self._init_channel_dashboards()
 
     async def _init_channel_dashboards(self):
-        """Post or refresh the persistent actions embed in every active channel."""
         active_names = {"ryo-general", "ryo-travel"}
         for guild in self.guilds:
             for channel in guild.text_channels:
@@ -260,16 +263,16 @@ class Client(discord.Client):
                 await self._restore_channel_dashboard(channel)
 
     async def _restore_channel_dashboard(self, channel: discord.TextChannel):
-        """Find existing dashboard embed or post a fresh one at the bottom."""
         embed = _channel_dashboard_embed(channel.name)
         if embed is None:
             return
-        # Look for an existing dashboard message from the bot
         existing = None
         async for msg in channel.history(limit=30, oldest_first=False):
-            if msg.author == self.user and msg.embeds and msg.embeds[0].title and "Available Actions" in msg.embeds[0].title:
-                existing = msg
-                break
+            if msg.author == self.user and msg.embeds:
+                title = msg.embeds[0].title or ""
+                if any(kw in title for kw in _DASHBOARD_KEYWORDS):
+                    existing = msg
+                    break
         if existing:
             await existing.edit(embed=embed)
             _channel_dashboards[channel.id] = existing
@@ -300,7 +303,6 @@ class Client(discord.Client):
                     print(f"Missing permission to create #ryo-stats in {guild.name}")
                     continue
 
-            # Collect existing bot embed messages in order
             existing = []
             async for msg in channel.history(limit=10, oldest_first=True):
                 if msg.author == self.user and msg.embeds:
@@ -309,12 +311,10 @@ class Client(discord.Client):
             embeds = _all_embeds()
 
             if len(existing) == len(embeds):
-                # Reuse and refresh all panels
                 for msg, emb in zip(existing, embeds):
                     await msg.edit(embed=emb)
                 _stats_messages[guild.id] = existing
             else:
-                # Clear and repost clean dashboard
                 await channel.purge(limit=20, check=lambda m: m.author == self.user)
                 msgs = [await channel.send(embed=emb) for emb in embeds]
                 _stats_messages[guild.id] = msgs
@@ -382,12 +382,6 @@ class Client(discord.Client):
                 else:
                     _reschedule_reminder(reminder["id"], snooze_interval, repeat_count - 1)
                 print(f"Pinged {discord_id}: {index_title} (repeat_count={repeat_count})")
-                await dispatch("reminder", {
-                    "discord_id": discord_id,
-                    "index_title": index_title,
-                    "context": context,
-                    "repeat_count": repeat_count,
-                })
 
     async def on_message(self, message):
         global _totals, _last_cost, _session_messages
@@ -395,64 +389,9 @@ class Client(discord.Client):
         if message.author == self.user:
             return
 
-        # webhook commands — owner only
-        if message.content.strip().startswith("!addwebhook"):
-            if str(message.author.id) != conf.owner_discord_id:
-                await message.channel.send("🚫 Only the bot owner can manage webhooks.")
-                return
-            parts = message.content.strip().split()
-            if len(parts) >= 3:
-                label = " ".join(parts[3:]) if len(parts) > 3 else ""
-                await message.channel.send(add_webhook(parts[1], parts[2], label))
-            else:
-                await message.channel.send("Usage: `!addwebhook <event> <url> [label]`\nEvents: `reminder`, `low_credit`, `new_user`, `message`")
-            return
-
-        if message.content.strip().startswith("!removewebhook"):
-            if str(message.author.id) != conf.owner_discord_id:
-                await message.channel.send("🚫 Only the bot owner can manage webhooks.")
-                return
-            parts = message.content.strip().split()
-            if len(parts) == 2:
-                await message.channel.send(remove_webhook(parts[1]))
-            else:
-                await message.channel.send("Usage: `!removewebhook <event>`")
-            return
-
-        if message.content.strip() == "!listwebhooks":
-            if str(message.author.id) != conf.owner_discord_id:
-                await message.channel.send("🚫 Only the bot owner can manage webhooks.")
-                return
-            rows = list_webhooks()
-            if not rows:
-                await message.channel.send("No webhooks configured. Use `!addwebhook <event> <url>`")
-            else:
-                lines = "\n".join(f"• `{r['event']}` — {r['url']}" + (f" _{r['label']}_" if r['label'] else "") for r in rows)
-                await message.channel.send(f"**Configured webhooks:**\n{lines}")
-            return
-
-        # !setcredits command — owner only
-        if message.content.strip().startswith("!setcredits"):
-            if str(message.author.id) != conf.owner_discord_id:
-                await message.channel.send("🚫 Only the bot owner can update credits.")
-                return
-            parts = message.content.strip().split()
-            if len(parts) == 2:
-                try:
-                    amount = float(parts[1].lstrip("$"))
-                    cost_db.set_credit_balance(amount)
-                    _totals = cost_db.load()
-                    await message.channel.send(f"✅ Credit balance set to **${amount:.2f}**")
-                    if message.guild:
-                        await self._update_stats_panel(message.guild)
-                    return
-                except ValueError:
-                    await message.channel.send("Usage: `!setcredits 28.35`")
-                    return
-
         channel_name = getattr(message.channel, "name", "")
 
-        # !clear — owner only, deletes all messages in channel (<14 days)
+        # !clear — owner only, works in any channel
         if message.content.strip() == "!clear":
             if str(message.author.id) != conf.owner_discord_id:
                 await message.channel.send("🚫 Only the bot owner can clear conversations.")
@@ -470,7 +409,6 @@ class Client(discord.Client):
                 f"-# For messages older than 14 days use **Undiscord** — github.com/victornpb/undiscord"
             )
             await confirm.delete(delay=8)
-            # Restore persistent dashboards after clearing
             if channel_name == "ryo-stats" and message.guild:
                 await self._init_stats_panels()
             elif isinstance(message.channel, discord.TextChannel):
@@ -478,18 +416,32 @@ class Client(discord.Client):
                 await self._restore_channel_dashboard(message.channel)
             return
 
-        # ryo-stats: only cost/webhook commands allowed
+        # ryo-stats: only stats commands work here
         if channel_name == "ryo-stats":
-            if message.content.strip() == "!refresh":
+            cmd = message.content.strip()
+            if cmd == "!refresh":
                 if message.guild:
                     await self._update_stats_panel(message.guild)
-            elif not message.content.strip().startswith("!"):
+            elif cmd.startswith("!setcredits"):
+                if str(message.author.id) != conf.owner_discord_id:
+                    await message.channel.send("🚫 Only the bot owner can update credits.")
+                    return
+                parts = cmd.split()
+                if len(parts) == 2:
+                    try:
+                        amount = float(parts[1].lstrip("$"))
+                        cost_db.set_credit_balance(amount)
+                        _totals = cost_db.load()
+                        await message.channel.send(f"✅ Credit balance set to **${amount:.2f}**")
+                        if message.guild:
+                            await self._update_stats_panel(message.guild)
+                    except ValueError:
+                        await message.channel.send("Usage: `!setcredits 28.35`")
+                else:
+                    await message.channel.send("Usage: `!setcredits 28.35`")
+            elif not cmd.startswith("!"):
                 await message.channel.send("📊 This channel shows cost diagnostics only. Chat with Ryo in **#ryo-general**!")
-            # fall through so !setcredits / !addwebhook etc. are handled below
-            else:
-                pass  # handled by the command blocks below
-            if message.content.strip() == "!refresh" or not message.content.strip().startswith("!"):
-                return
+            return
 
         discord_id = str(message.author.id)
         display_name = message.author.display_name
@@ -498,7 +450,6 @@ class Client(discord.Client):
         is_new = register_user(discord_id, username, display_name)
         if is_new:
             print(f"New user registered: {display_name} ({discord_id})")
-            await dispatch("new_user", {"discord_id": discord_id, "display_name": display_name})
 
         channel_type = "travel" if channel_name == "ryo-travel" else "general"
 
@@ -522,12 +473,12 @@ class Client(discord.Client):
                 await self._update_stats_panel(message.guild)
             return
 
-        # !plan-trip <destination> <YYYY-MM-DD> <YYYY-MM-DD>
+        # !plan-trip — ryo-travel only
         if channel_name == "ryo-travel" and message.content.strip().startswith("!plan-trip"):
             await self._handle_plan_trip(message, discord_id, display_name)
             return
 
-        # !travel-preferences — show or collect travel prefs
+        # !travel-preferences — ryo-travel only
         if channel_name == "ryo-travel" and message.content.strip() in ("!travel-preferences", "!refresh"):
             prefs = _get_travel_preferences(discord_id)
             if prefs:
@@ -545,7 +496,7 @@ class Client(discord.Client):
             await message.channel.send(TRAVEL_PREF_QUESTIONNAIRE)
             return
 
-        # Pending pref reply — save via CEO with save prompt
+        # Pending pref reply — save via CEO with travel_preferences_save prompt
         if channel_name == "ryo-travel" and discord_id in _pending_travel_prefs:
             _pending_travel_prefs.discard(discord_id)
             channel_type = "travel_preferences_save"
@@ -558,11 +509,10 @@ class Client(discord.Client):
                 channel_type=channel_type,
             )
 
-        # Off-topic routing: specialized channel detected it's not relevant
+        # Off-topic routing: specialized channel redirects to general
         if response.startswith("<<ROUTE:general>>"):
             redirect_msg = response.replace("<<ROUTE:general>>", "").strip()
             await message.channel.send(_sanitize(redirect_msg))
-            # Re-run in the general channel and post answer there
             if message.guild:
                 general = self._get_general_channel(message.guild)
                 if general:
@@ -585,20 +535,11 @@ class Client(discord.Client):
             cost_db.save(cost_info)
             _totals = cost_db.load()
             await self._check_low_credit()
-            await dispatch("message", {
-                "discord_id": discord_id,
-                "display_name": display_name,
-                "cost_usd": cost_info["total_cost_usd"],
-                "input_tokens": cost_info["input_tokens"],
-                "output_tokens": cost_info["output_tokens"],
-                "duration_ms": cost_info["duration_ms"],
-            })
 
         if message.guild:
             await self._update_stats_panel(message.guild)
 
     def _get_general_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
-        # Prefer the dedicated ryo-general channel, fall back to any non-specialised channel
         preferred = discord.utils.get(guild.text_channels, name="ryo-general")
         if preferred and guild.me.permissions_in(preferred).send_messages:
             return preferred
@@ -630,7 +571,6 @@ class Client(discord.Client):
             f"✈️ Planning your **{days}-day {destination}** trip… this may take a moment!"
         )
 
-        # Gather all travel preferences in the server
         prefs = _get_all_travel_prefs()
         prefs_context = ""
         if prefs:
@@ -652,12 +592,10 @@ class Client(discord.Client):
                 channel_type="travel",
             )
 
-        # Post the itinerary
         await status_msg.delete()
         for chunk in _chunk(_sanitize(itinerary)):
             await message.channel.send(chunk)
 
-        # Extract structured events and create Discord Scheduled Events
         if message.guild:
             await message.channel.send("📅 Creating Discord events for each day…")
             try:
@@ -674,7 +612,6 @@ class Client(discord.Client):
                 print(f"Trip event creation error: {e}")
                 await message.channel.send("⚠️ Itinerary ready but couldn't create Discord events.")
 
-        # Store pre-trip reminders for the user
         _store_trip_reminders(discord_id, f"{destination} trip", start_date)
         await message.channel.send(
             f"⏰ Pre-trip reminders set for **{display_name}** — 7 days, 2 days, and 1 day before departure."
@@ -706,7 +643,6 @@ class Client(discord.Client):
                 )
                 cost_db.mark_low_credit_alerted()
                 _totals["low_credit_alerted"] = 1
-                await dispatch("low_credit", {"remaining_usd": remaining, "balance_usd": balance})
             except Exception as e:
                 print(f"Low credit alert failed: {e}")
 
