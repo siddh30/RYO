@@ -1,25 +1,51 @@
-# RYO — Work in Balance. Life in Flow.
+# 🌀 RYO — Work in Balance. Life in Flow.
 
-A hierarchical multi-agent Discord bot that helps you maintain work-life balance by managing news, web research, and personal memory — and proactively pings you when it matters.
+> **Unlike other AI assistants where you go to them — RYO comes to you.** 😎🔥
+
+RYO is your autonomous life-balance partner living right inside Discord. It protects your personal time from work chaos, keeps you informed, remembers what matters, and proactively pings you before life slips through the cracks — all without you lifting a finger.
 
 ---
 
-## What RYO Can Do
+## ✨ Why RYO?
 
-| Capability | How to use it |
+Most AI tools wait to be asked. RYO doesn't.
+
+- 🗞️ **Stay informed** — get personalized news headlines without doomscrolling
+- 🧠 **Never forget** — RYO remembers your context so you don't have to repeat yourself
+- ⏰ **Be proactive** — set smart reminders that chase *you*, not the other way around
+- 🌤️ **Stay prepared** — instant weather for any city before you step out
+- 💬 **Just talk naturally** — no commands, no syntax, just plain English in your Discord server
+
+---
+
+## 🤖 What RYO Can Do Today
+
+| Capability | Example |
 |---|---|
-| **Personalized news** | "What's in the news?" — tailored to your saved preferences |
-| **Web search** | "Find me info on X" / "Look up Y" |
-| **Weather** | "What's the weather in Jersey City?" |
-| **Permanent memory** | "Remember that I'm a VP at JPMorgan" |
-| **Reminders** | "Remind me to submit my report by Friday" |
-| **Repeat reminders** | "Remind me 3 times every 10 minutes" / "Keep reminding me until I say stop" |
-| **Per-user profiles** | Each Discord user gets their own isolated memory |
-| **Forget** | "Forget my address" / "Stop reminding me about X" |
+| 📰 **Personalized news** | *"What's in the news?"* — tailored to your saved preferences |
+| 🔍 **Web search** | *"Find me info on X"* / *"Look up Y"* |
+| 🌤️ **Weather** | *"What's the weather in Jersey City?"* |
+| 🧠 **Permanent memory** | *"Remember that I'm a VP at JPMorgan"* |
+| ⏰ **Reminders** | *"Remind me to submit my report by Friday"* |
+| 🔁 **Repeat reminders** | *"Remind me 3 times every 10 minutes"* / *"Keep reminding me until I say stop"* |
+| 👤 **Per-user profiles** | Each Discord user gets their own isolated memory and preferences |
+| 🗑️ **Forget** | *"Forget my address"* / *"Stop reminding me about X"* |
 
 ---
 
-## Architecture
+## 🚀 Coming Soon
+
+RYO is growing into a full life-management co-pilot:
+
+- 🎯 **Goal tracking** — set fitness, career, and personal goals; RYO nudges you on progress
+- 🥗 **Meal prep** — smart recipes and food inventory management
+- 💪 **Gym routine** — weekly workout tracking with adaptive scheduling
+- 📅 **Daily briefings** — proactive morning summaries tailored to your day
+- 🌐 **Full beta release** — polished, invite-ready for your whole server
+
+---
+
+## 🏗️ Architecture
 
 ### Request Flow
 
@@ -28,11 +54,11 @@ flowchart TD
     A([Discord Message]) --> B[main.py\non_message handler]
     B --> C[register_user\nauto-register on first message]
     C --> D[run_ceo\nagents/ceo.py]
-    D --> E{claude-agent-sdk\nquery}
+    D --> E{claude-agent-sdk\nclaude-sonnet-4-6}
 
-    E -->|news request| F[news-agent skill\nWebSearch + WebFetch]
-    E -->|search / weather| G[search-agent skill\nWebSearch + WebFetch + Bash]
-    E -->|remember / remind| H[memory-supervisor skill]
+    E -->|news request| F[🗞️ news-agent skill\nWebSearch + WebFetch]
+    E -->|search / weather| G[🔍 search-agent skill\nWebSearch + WebFetch + Bash]
+    E -->|remember / remind| H[🧠 memory-supervisor skill]
     H -->|store| I[memory-store skill\nstore_memory.py]
     H -->|delete| J[memory-delete skill\ndelete_memory.py]
 
@@ -41,21 +67,20 @@ flowchart TD
     G -->|weather| L[curl OpenWeatherMap API]
 
     E --> M[Response text]
-    M --> N[_sanitize\nstrip markdown]
-    N --> O[_chunk\n1900-char splits]
-    O --> P([Discord reply])
+    M --> N[sanitize + chunk\nDiscord-safe formatting]
+    N --> O([Discord reply])
 ```
 
-### Reminder Loop
+### Proactive Reminder Loop
 
 ```mermaid
 flowchart LR
     T([Every 60 seconds]) --> Q[query reminders\nWHERE window <= now]
     Q --> R{repeat_count?}
-    R -->|1 = once| S[send DM → delete row]
-    R -->|N times| U[send DM → decrement count\nreschedule window]
-    R -->|-1 = infinite| V[send DM → reschedule window\nkeep repeat_count = -1]
-    S --> W([DM / channel ping])
+    R -->|once| S[send DM → delete row]
+    R -->|N times| U[send DM → decrement\nreschedule window]
+    R -->|infinite| V[send DM → reschedule\nuntil user says stop]
+    S --> W([DM or channel ping])
     U --> W
     V --> W
 ```
@@ -94,7 +119,9 @@ erDiagram
 
 ---
 
-## Skill Layout
+## 🧩 Skill Layout
+
+RYO is built on the **Claude Agent SDK** with filesystem-based Agent Skills — each skill is a directory that Claude loads on-demand, keeping context lean and responses fast.
 
 ```
 .claude/skills/
@@ -103,17 +130,15 @@ erDiagram
 ├── memory-supervisor/SKILL.md   ← routes store vs delete, asks repeat preference
 ├── memory-store/
 │   ├── SKILL.md
-│   └── scripts/store_memory.py  ← SQLite INSERT with repeat/snooze args
+│   └── scripts/store_memory.py  ← SQLite INSERT with repeat/snooze support
 └── memory-delete/
     ├── SKILL.md
     └── scripts/delete_memory.py ← SQLite DELETE scoped to discord_id
 ```
 
-Skills are auto-loaded by the Claude Agent SDK from `.claude/skills/` — no explicit registration needed.
-
 ---
 
-## Setup
+## ⚙️ Setup
 
 ### 1. Environment
 
@@ -125,9 +150,9 @@ pip install -r requirements.txt
 ### 2. `.env`
 
 ```
-ANTHROPIC_API_KEY=""        # from console.anthropic.com (or leave blank if using Claude Code auth)
-OPENWEATHERMAP_API_KEY=""   # from openweathermap.org
-DISCORD_TOKEN=""            # from discord.com/developers
+ANTHROPIC_API_KEY=""        # console.anthropic.com (or leave blank if using Claude Code auth)
+OPENWEATHERMAP_API_KEY=""   # openweathermap.org
+DISCORD_TOKEN=""            # discord.com/developers
 ```
 
 ### 3. Database
@@ -146,20 +171,24 @@ python main.py
 
 ---
 
-## Status
+## ✅ Status
 
-### Done
-- Claude Agent SDK integration (`claude-sonnet-4-6`)
-- Agent Skills for news, search, and memory
-- Per-user memory with Discord ID scoping
-- SQLite memory database with migration from CSV
-- Reminder pinging with repeat / snooze support
-- Discord-optimized response formatting
-- Auto user registration on first message
+### Shipped
+- ✅ Claude Agent SDK integration (`claude-sonnet-4-6`)
+- ✅ Agent Skills for news, search, and memory
+- ✅ Per-user memory with Discord ID scoping
+- ✅ SQLite memory database with migration from CSV
+- ✅ Proactive reminder pinging with repeat / snooze support
+- ✅ Discord-optimized response formatting
+- ✅ Auto user registration on first message
 
 ### Roadmap
-- Goal tracking (fitness, career, personal)
-- Meal prep and food inventory management
-- Gym routine tracking
-- Proactive daily briefings
-- Full beta release
+- ⏳ Goal tracking (fitness, career, personal)
+- ⏳ Meal prep and food inventory management
+- ⏳ Gym routine tracking
+- ⏳ Proactive daily briefings
+- ⏳ Full beta release
+
+---
+
+> *Let RYO manage the noise so you can focus on what matters — and flow through life organized, informed, and stress-free.* 🌀
