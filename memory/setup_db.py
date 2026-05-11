@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS reminders (
     snooze_interval_mins  INTEGER DEFAULT 30,
     UNIQUE(discord_id, index_title)
 );
+
+CREATE TABLE IF NOT EXISTS channel_sessions (
+    channel_id   INTEGER PRIMARY KEY,
+    session_id   TEXT NOT NULL,
+    channel_type TEXT NOT NULL DEFAULT 'general',
+    updated_at   TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 INSERT = """

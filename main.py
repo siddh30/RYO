@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 from dateutil import parser as dateparser
 
-import anthropic
 
 sys.path.insert(0, '.')
 
@@ -40,12 +39,6 @@ _stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [embed mes
 _channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persistent dashboard
 _pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire
 _pending_trip_events: dict[int, dict] = {}  # channel_id -> pending duplicate-confirmation state
-_conversation_history: dict[int, list[tuple[str, str]]] = {}  # channel_id -> [(speaker, message), ...]
-_channel_input_tokens: dict[int, int] = {}  # channel_id -> latest input_tokens
-
-CONTEXT_WINDOW = 200_000       # claude-sonnet-4-6
-COMPRESS_AT    = 0.80          # compress when context hits 80%
-COMPRESS_TO    = 0.20          # target summary size ~20% of window
 
 
 def _sanitize(text: str) -> str:
@@ -207,36 +200,31 @@ TRAVEL_PREF_QUESTIONNAIRE = """✈️ Let's set up your travel profile! Reply wi
 Reply with numbered answers and I'll save them to your profile!"""
 
 
-def _append_history(channel_id: int, display_name: str, user_msg: str, bot_response: str):
-    history = _conversation_history.setdefault(channel_id, [])
-    history.append((display_name, user_msg))
-    history.append(("Ryo", bot_response))
+def _get_channel_session(channel_id: int) -> str | None:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT session_id FROM channel_sessions WHERE channel_id = ?", (channel_id,)
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
 
 
-async def _compress_history(channel_id: int) -> str:
-    """Summarise the current conversation history into a compact block."""
-    history = _conversation_history.get(channel_id, [])
-    if not history:
-        return ""
-    formatted = "\n".join(f"{name}: {msg}" for name, msg in history)
-    client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    resp = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=int(CONTEXT_WINDOW * COMPRESS_TO),
-        messages=[{
-            "role": "user",
-            "content": (
-                "Compress this Discord conversation into a dense summary that preserves all key facts, "
-                "preferences, decisions, and ongoing context Ryo needs to continue seamlessly. "
-                "Write in third person, plain prose, no bullet points.\n\n"
-                f"{formatted}"
-            ),
-        }],
+def _save_channel_session(channel_id: int, session_id: str, channel_type: str = "general"):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO channel_sessions (channel_id, session_id, channel_type, updated_at)"
+        " VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+        (channel_id, session_id, channel_type),
     )
-    summary = resp.content[0].text
-    _conversation_history[channel_id] = [("Summary", summary)]
-    _channel_input_tokens[channel_id] = 0
-    return summary
+    conn.commit()
+    conn.close()
+
+
+def _clear_channel_session(channel_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM channel_sessions WHERE channel_id = ?", (channel_id,))
+    conn.commit()
+    conn.close()
 
 
 def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None, str]:
@@ -514,8 +502,7 @@ class Client(discord.Client):
                 f"-# For messages older than 14 days use **Undiscord** — github.com/victornpb/undiscord"
             )
             await confirm.delete(delay=8)
-            _conversation_history.pop(message.channel.id, None)
-            _channel_input_tokens.pop(message.channel.id, None)
+            _clear_channel_session(message.channel.id)
             if channel_name == "ryo-stats" and message.guild:
                 await self._init_stats_panels()
             elif isinstance(message.channel, discord.TextChannel):
@@ -622,16 +609,18 @@ class Client(discord.Client):
             channel_type = "travel_preferences_save"
 
         channel_id = message.channel.id
-        history = _conversation_history.get(channel_id, [])
 
         async with message.channel.typing():
-            response, cost_info = await run_ceo(
+            response, cost_info, new_session_id = await run_ceo(
                 user_message=message.content.strip(),
                 discord_id=discord_id,
                 display_name=display_name,
                 channel_type=channel_type,
-                conversation_history=history,
+                session_id=_get_channel_session(channel_id),
             )
+
+        if new_session_id:
+            _save_channel_session(channel_id, new_session_id, channel_type)
 
         # Off-topic routing: specialized channel redirects to general
         if response.startswith("<<ROUTE:general>>"):
@@ -640,22 +629,21 @@ class Client(discord.Client):
             if message.guild:
                 general = self._get_general_channel(message.guild)
                 if general:
-                    gen_history = _conversation_history.get(general.id, [])
                     async with general.typing():
-                        gen_response, cost_info = await run_ceo(
+                        gen_response, cost_info, gen_session_id = await run_ceo(
                             user_message=message.content.strip(),
                             discord_id=discord_id,
                             display_name=display_name,
                             channel_type="general",
-                            conversation_history=gen_history,
+                            session_id=_get_channel_session(general.id),
                         )
+                    if gen_session_id:
+                        _save_channel_session(general.id, gen_session_id, "general")
                     for chunk in _chunk(_sanitize(gen_response)):
                         await general.send(f"↩️ *Redirected from #{channel_name}*\n{chunk}")
-                    _append_history(general.id, display_name, message.content.strip(), gen_response)
         else:
             for chunk in _chunk(_sanitize(response)):
                 await message.channel.send(chunk)
-            _append_history(channel_id, display_name, message.content.strip(), response)
 
         if cost_info:
             _last_cost = cost_info
@@ -663,11 +651,6 @@ class Client(discord.Client):
             cost_db.save(cost_info)
             _totals = cost_db.load()
             await self._check_low_credit()
-
-            input_tokens = cost_info.get("input_tokens", 0)
-            _channel_input_tokens[channel_id] = input_tokens
-            if input_tokens > CONTEXT_WINDOW * COMPRESS_AT:
-                await self._compress_and_notify(channel_id, message.channel)
 
         if message.guild:
             await self._update_stats_panel(message.guild)
@@ -716,13 +699,15 @@ class Client(discord.Client):
         )
 
         async with message.channel.typing():
-            itinerary, cost_info = await run_ceo(
+            itinerary, cost_info, new_session_id = await run_ceo(
                 user_message=trip_prompt,
                 discord_id=discord_id,
                 display_name=display_name,
                 channel_type="travel",
-                conversation_history=_conversation_history.get(message.channel.id, []),
+                session_id=_get_channel_session(message.channel.id),
             )
+        if new_session_id:
+            _save_channel_session(message.channel.id, new_session_id, "travel")
 
         await status_msg.delete()
         for chunk in _chunk(_sanitize(itinerary)):
@@ -826,17 +811,6 @@ class Client(discord.Client):
             _pending_trip_events[channel_id] = pending
             await message.channel.send("Reply `yes` to replace duplicates or `no` to skip them.")
 
-    async def _compress_and_notify(self, channel_id: int, channel):
-        await _compress_history(channel_id)
-        try:
-            user = await self.fetch_user(int(conf.owner_discord_id))
-            await user.send(f"🗜️ **Context compressed** in #{getattr(channel, 'name', 'DM')} — conversation was approaching 80% of Sonnet's context window. Summary saved, continuing seamlessly.")
-        except Exception:
-            pass
-        try:
-            await channel.send("-# 🗜️ Context compressed — long conversation summarised to stay within limits.")
-        except Exception:
-            pass
 
     async def _check_low_credit(self):
         balance = _totals.get("credit_balance_usd")

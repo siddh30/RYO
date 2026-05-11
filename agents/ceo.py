@@ -17,12 +17,14 @@ async def run_ceo(
     discord_id: str,
     display_name: str,
     channel_type: str = "general",
-    conversation_history: list[tuple[str, str]] | None = None,
-) -> tuple[str, dict]:
+    session_id: str | None = None,
+) -> tuple[str, dict, str | None]:
     rm = ResourceManager.get_instance()
     prompt_name = CHANNEL_PROMPTS.get(channel_type, "ceo_prompt")
     base_prompt = rm.prompt_loader(prompt_name)
 
+    # Re-injected fresh each turn so the model always knows the current speaker,
+    # even when resuming a session that was started by a different user.
     user_context = (
         f"\n<CurrentUser>\n"
         f"DisplayName: {display_name}\n"
@@ -30,18 +32,14 @@ async def run_ceo(
         f"</CurrentUser>"
     )
 
-    history_context = ""
-    if conversation_history:
-        lines = "\n".join(f"{name}: {msg}" for name, msg in conversation_history)
-        history_context = f"\n<RecentConversation>\n{lines}\n</RecentConversation>"
-
     async for message in query(
         prompt=user_message,
         options=ClaudeAgentOptions(
-            system_prompt=base_prompt + user_context + history_context,
+            system_prompt=base_prompt + user_context,
             model="claude-sonnet-4-6",
             allowed_tools=["Read", "Write", "Edit", "Bash", "WebSearch", "WebFetch"],
             permission_mode="dontAsk",
+            resume=session_id,
         ),
     ):
         if isinstance(message, ResultMessage):
@@ -55,6 +53,6 @@ async def run_ceo(
                 "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
                 "cache_creation_tokens": usage.get("cache_creation_input_tokens", 0),
             }
-            return message.result or "", cost_info
+            return message.result or "", cost_info, message.session_id
 
-    return "", {}
+    return "", {}, None
