@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS cost_tracking (
     total_cache_read_tokens INTEGER DEFAULT 0,
     total_messages          INTEGER DEFAULT 0,
     credit_balance_usd      REAL    DEFAULT NULL,
+    low_credit_alerted      INTEGER DEFAULT 0,
     last_updated            TEXT
 );
 INSERT OR IGNORE INTO cost_tracking (id) VALUES (1);
@@ -100,6 +101,7 @@ def main():
     add_column_if_missing(conn, "reminders", "discord_id", "TEXT")
     add_column_if_missing(conn, "reminders", "repeat_count", "INTEGER DEFAULT 1")
     add_column_if_missing(conn, "reminders", "snooze_interval_mins", "INTEGER DEFAULT 30")
+    add_column_if_missing(conn, "cost_tracking", "low_credit_alerted", "INTEGER DEFAULT 0")
 
     p = migrate_csv(conn, PERMANENT_CSV, "permanent_memories")
     r = migrate_csv(conn, REMINDERS_CSV, "reminders")

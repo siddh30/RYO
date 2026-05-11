@@ -286,12 +286,31 @@ class Client(discord.Client):
             _session_messages += 1
             cost_db.save(cost_info)
             _totals = cost_db.load()
+            await self._check_low_credit()
 
         for chunk in _chunk(_sanitize(response)):
             await message.channel.send(chunk)
 
         if message.guild:
             await self._update_stats_panel(message.guild)
+
+    async def _check_low_credit(self):
+        balance = _totals.get("credit_balance_usd")
+        alerted = _totals.get("low_credit_alerted", 0)
+        if balance is None or alerted:
+            return
+        remaining = balance - _totals.get("total_cost_usd", 0.0)
+        if remaining < 5.0:
+            try:
+                user = await self.fetch_user(int(conf.owner_discord_id))
+                await user.send(
+                    f"⚠️ **Low credit alert!** You have an estimated **${remaining:.2f}** remaining.\n"
+                    f"Top up at {BILLING_URL}"
+                )
+                cost_db.mark_low_credit_alerted()
+                _totals["low_credit_alerted"] = 1
+            except Exception as e:
+                print(f"Low credit alert failed: {e}")
 
 
 client = Client(intents=intents)

@@ -47,8 +47,15 @@ def save(delta: dict):
 def set_credit_balance(amount_usd: float):
     conn = _conn()
     conn.execute(
-        "UPDATE cost_tracking SET credit_balance_usd = ? WHERE id = 1",
+        "UPDATE cost_tracking SET credit_balance_usd = ?, low_credit_alerted = 0 WHERE id = 1",
         (amount_usd,),
     )
+    conn.commit()
+    conn.close()
+
+
+def mark_low_credit_alerted():
+    conn = _conn()
+    conn.execute("UPDATE cost_tracking SET low_credit_alerted = 1 WHERE id = 1")
     conn.commit()
     conn.close()
