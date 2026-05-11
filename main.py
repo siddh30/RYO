@@ -9,6 +9,11 @@ from config import Config
 conf = Config()
 
 from agents.ceo import run_ceo
+from agents.vision import run_vision
+from agents.trip_planner import (
+    _get_all_travel_prefs, _store_trip_reminders,
+    extract_trip_events, create_discord_events,
+)
 from memory.register_user import register_user
 from memory import cost_db
 from utils.webhook_dispatch import dispatch, add_webhook, remove_webhook, list_webhooks
@@ -117,7 +122,9 @@ Reply with numbered answers and I'll save them to your profile!"""
 
 TRAVEL_COMMANDS = (
     "`!travel-preferences` — view or set up your travel profile\n"
-    "`!refresh` — re-fetch your preferences"
+    "`!travel-preferences update` — update your saved preferences\n"
+    "`!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>` — full itinerary + Discord events + reminders\n"
+    "📸 Attach any image and ask a question — Ryo can see it"
 )
 
 
@@ -400,6 +407,31 @@ class Client(discord.Client):
 
         channel_type = "travel" if channel_name == "ryo-travel" else "general"
 
+        # Image / PDF attachments — route to vision
+        image_attachments = [
+            (a.url, a.content_type or "image/jpeg")
+            for a in message.attachments
+            if (a.content_type or "").startswith("image/")
+            or a.content_type == "application/pdf"
+        ]
+        if image_attachments:
+            async with message.channel.typing():
+                vision_response = await run_vision(
+                    user_message=message.content.strip(),
+                    attachment_urls=image_attachments,
+                    display_name=display_name,
+                )
+            for chunk in _chunk(_sanitize(vision_response)):
+                await message.channel.send(chunk)
+            if message.guild:
+                await self._update_stats_panel(message.guild)
+            return
+
+        # !plan-trip <destination> <YYYY-MM-DD> <YYYY-MM-DD>
+        if channel_name == "ryo-travel" and message.content.strip().startswith("!plan-trip"):
+            await self._handle_plan_trip(message, discord_id, display_name)
+            return
+
         # !travel-preferences — show or collect travel prefs
         if channel_name == "ryo-travel" and message.content.strip() in ("!travel-preferences", "!refresh"):
             prefs = _get_travel_preferences(discord_id)
@@ -480,6 +512,89 @@ class Client(discord.Client):
             if ch.name not in specialized and guild.me.permissions_in(ch).send_messages:
                 return ch
         return None
+
+    async def _handle_plan_trip(self, message: discord.Message, discord_id: str, display_name: str):
+        parts = message.content.strip().split()
+        if len(parts) < 4:
+            await message.channel.send(
+                "Usage: `!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>`\n"
+                "Example: `!plan-trip Tokyo 2026-06-01 2026-06-07`"
+            )
+            return
+
+        destination = parts[1]
+        try:
+            start_date = datetime.fromisoformat(parts[2])
+            end_date = datetime.fromisoformat(parts[3])
+        except ValueError:
+            await message.channel.send("Date format must be YYYY-MM-DD. Example: `2026-06-01`")
+            return
+
+        days = (end_date - start_date).days + 1
+        status_msg = await message.channel.send(
+            f"✈️ Planning your **{days}-day {destination}** trip… this may take a moment!"
+        )
+
+        # Gather all travel preferences in the server
+        prefs = _get_all_travel_prefs()
+        prefs_context = ""
+        if prefs:
+            prefs_context = "\n\nTravel profiles for this trip:\n" + "\n\n".join(
+                f"**{p['display_name']}**: {p['context']}" for p in prefs
+            )
+
+        trip_prompt = (
+            f"Plan a detailed {days}-day itinerary for {destination} "
+            f"from {start_date.strftime('%B %d')} to {end_date.strftime('%B %d, %Y')}."
+            f"{prefs_context}"
+        )
+
+        async with message.channel.typing():
+            itinerary, cost_info = await run_ceo(
+                user_message=trip_prompt,
+                discord_id=discord_id,
+                display_name=display_name,
+                channel_type="travel",
+            )
+
+        # Post the itinerary
+        await status_msg.delete()
+        for chunk in _chunk(_sanitize(itinerary)):
+            await message.channel.send(chunk)
+
+        # Extract structured events and create Discord Scheduled Events
+        if message.guild:
+            await message.channel.send("📅 Creating Discord events for each day…")
+            try:
+                events = await extract_trip_events(itinerary, destination, start_date)
+                created = await create_discord_events(message.guild, events, destination, start_date)
+                if created:
+                    await message.channel.send(
+                        f"✅ Created **{len(created)}** Discord events! Check the Events tab in your server.\n"
+                        f"⏰ Setting pre-trip reminders for you…"
+                    )
+                else:
+                    await message.channel.send("⚠️ Could not create Discord events — check the bot has **Manage Events** permission.")
+            except Exception as e:
+                print(f"Trip event creation error: {e}")
+                await message.channel.send("⚠️ Itinerary ready but couldn't create Discord events.")
+
+        # Store pre-trip reminders for the user
+        _store_trip_reminders(discord_id, f"{destination} trip", start_date)
+        await message.channel.send(
+            f"⏰ Pre-trip reminders set for **{display_name}** — 7 days, 2 days, and 1 day before departure."
+        )
+
+        if cost_info:
+            global _last_cost, _session_messages, _totals
+            _last_cost = cost_info
+            _session_messages += 1
+            cost_db.save(cost_info)
+            _totals = cost_db.load()
+            await self._check_low_credit()
+
+        if message.guild:
+            await self._update_stats_panel(message.guild)
 
     async def _check_low_credit(self):
         balance = _totals.get("credit_balance_usd")
