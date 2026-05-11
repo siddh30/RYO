@@ -239,41 +239,44 @@ async def _compress_history(channel_id: int) -> str:
     return summary
 
 
-def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None]:
+def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None, str]:
     """
-    Parse 'New Orleans 19th May to 24th May' → ('New Orleans', datetime, datetime).
-    Handles multi-word destinations, natural language dates, and 'to/through/until' separators.
+    Parse trip command text → (destination, start_date, end_date, extra_context).
+    Handles multi-word destinations, natural language dates, 'to/through/until' separators,
+    and any trailing description/notes after the end date.
+
+    Examples:
+      'New Orleans 19th May to 24th May'
+      'Tokyo June 1 to June 7 2026 focus on street food and anime'
+      'Paris 2026-06-01 2026-06-07, romantic trip, budget €200/day'
     """
-    # Split on date-range separator
     halves = re.split(r'\s+(?:to|through|until|[-–→])\s+', text, maxsplit=1, flags=re.IGNORECASE)
 
     try:
         if len(halves) == 2:
             first, second = halves
-            # fuzzy_with_tokens extracts the date and returns non-date tokens as destination
-            start_dt, tokens = dateparser.parse(first, fuzzy_with_tokens=True, dayfirst=False)
-            destination = ' '.join(t.strip(',- ') for t in tokens if t.strip(',- '))
+            start_dt, start_tokens = dateparser.parse(first, fuzzy_with_tokens=True, dayfirst=False)
+            destination = ' '.join(t.strip(',- ') for t in start_tokens if t.strip(',- '))
 
-            # Parse end date; if no year given, inherit from start_dt
-            try:
-                end_dt = dateparser.parse(second, dayfirst=False, default=start_dt)
-            except Exception:
-                end_dt = dateparser.parse(second, fuzzy=True, default=start_dt)
+            # Extract end date + any trailing description from the second half
+            end_dt, end_tokens = dateparser.parse(second, fuzzy_with_tokens=True, dayfirst=False, default=start_dt)
+            extra = ' '.join(t.strip(',- ') for t in end_tokens if t.strip(',- '))
 
-            return destination.strip(), start_dt, end_dt
+            return destination.strip(), start_dt, end_dt, extra.strip()
 
-        # Fallback: original space-split for 'Destination YYYY-MM-DD YYYY-MM-DD'
+        # Fallback: 'Destination YYYY-MM-DD YYYY-MM-DD [extra text]'
         parts = text.split()
         if len(parts) >= 3:
             destination = parts[0]
             start_dt = dateparser.parse(parts[1], dayfirst=False)
             end_dt   = dateparser.parse(parts[2], dayfirst=False)
-            return destination, start_dt, end_dt
+            extra    = ' '.join(parts[3:])
+            return destination, start_dt, end_dt, extra.strip()
 
     except Exception:
         pass
 
-    return "", None, None
+    return "", None, None, ""
 
 
 def _get_travel_preferences(discord_id: str) -> str | None:
@@ -662,7 +665,7 @@ class Client(discord.Client):
 
     async def _handle_plan_trip(self, message: discord.Message, discord_id: str, display_name: str):
         raw = re.sub(r'^!plan-trip\s+', '', message.content.strip(), flags=re.IGNORECASE)
-        destination, start_date, end_date = _parse_trip_args(raw)
+        destination, start_date, end_date, extra_context = _parse_trip_args(raw)
 
         if not destination or not start_date or not end_date:
             await message.channel.send(
@@ -684,9 +687,11 @@ class Client(discord.Client):
                 f"**{p['display_name']}**: {p['context']}" for p in prefs
             )
 
+        extra_section = f"\n\nAdditional notes: {extra_context}" if extra_context else ""
         trip_prompt = (
             f"Plan a detailed {days}-day itinerary for {destination} "
             f"from {start_date.strftime('%B %d')} to {end_date.strftime('%B %d, %Y')}."
+            f"{extra_section}"
             f"{prefs_context}"
         )
 
