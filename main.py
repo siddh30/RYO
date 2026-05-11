@@ -54,22 +54,13 @@ def _chunk(text: str) -> list[str]:
     return chunks or [""]
 
 
-def _bar(ratio: float, width: int = 18) -> str:
+def _bar(ratio: float, width: int = 16) -> str:
     filled = max(0, min(width, round(ratio * width)))
     return "█" * filled + "░" * (width - filled)
 
 
-def _embed_status() -> discord.Embed:
-    e = discord.Embed(title="🌀  RYO  —  Work in Balance. Life in Flow.", color=0x57F287)
-    e.add_field(name="Status", value="🟢  Online", inline=True)
-    e.add_field(name="Session messages", value=f"`{_session_messages}`", inline=True)
-    e.add_field(name="Model", value="`claude-sonnet-4-6`", inline=True)
-    e.set_footer(text="Updates after every message")
-    e.timestamp = datetime.now()
-    return e
-
-
-def _embed_credits() -> discord.Embed:
+def _embed_overview() -> discord.Embed:
+    """Top panel — status + credits."""
     balance = _totals.get("credit_balance_usd")
     spent = _totals.get("total_cost_usd", 0.0)
 
@@ -78,58 +69,83 @@ def _embed_credits() -> discord.Embed:
         ratio = remaining / balance if balance > 0 else 0.0
         pct = ratio * 100
         color = 0x57F287 if pct > 30 else (0xFEE75C if pct > 10 else 0xED4245)
-        e = discord.Embed(title="💳  Credit Balance", color=color)
+    else:
+        color = 0x5865F2
+
+    e = discord.Embed(title="🌀  RYO Dashboard", color=color)
+
+    # Status row
+    e.add_field(name="Status", value="🟢 Online", inline=True)
+    e.add_field(name="Session", value=f"{_session_messages} msg(s)", inline=True)
+    e.add_field(name="Model", value="sonnet-4-6", inline=True)
+
+    # Credits section
+    if balance is not None:
+        bar = _bar(ratio)
         e.add_field(
-            name="Remaining",
-            value=f"**`${remaining:.2f}`**  /  `${balance:.2f}`",
+            name="💳 Credits",
+            value=(
+                f"{bar} **{pct:.1f}%**\n"
+                f"**${remaining:.2f}** remaining  ·  ${spent:.4f} spent  ·  [billing]({BILLING_URL})"
+            ),
             inline=False,
         )
+    else:
         e.add_field(
-            name=f"{_bar(ratio)}  {pct:.1f}%",
-            value=f"Spent `${spent:.4f}`",
+            name="💳 Credits",
+            value=f"Use `!setcredits <amount>` to set balance  ·  [billing]({BILLING_URL})",
             inline=False,
         )
-        e.add_field(name="Top up", value=f"[platform.claude.com]({BILLING_URL})", inline=True)
-        e.add_field(name="Update balance", value="`!setcredits <amount>`", inline=True)
-    else:
-        e = discord.Embed(title="💳  Credit Balance", color=0x99AAB5)
-        e.description = f"No balance set.\nUse `!setcredits 28.35` to set it.\n[Check billing]({BILLING_URL})"
 
-    e.timestamp = datetime.now()
-    return e
-
-
-def _embed_last_message() -> discord.Embed:
-    e = discord.Embed(title="⚡  Last Message", color=0x5865F2)
-    if _last_cost:
-        e.add_field(name="Cost", value=f"`${_last_cost['total_cost_usd']:.5f}`", inline=True)
-        e.add_field(name="Latency", value=f"`{_last_cost['duration_ms']} ms`", inline=True)
-        e.add_field(name="Turns", value=f"`{_last_cost['num_turns']}`", inline=True)
-        e.add_field(name="Input tokens", value=f"`{_last_cost['input_tokens']:,}`", inline=True)
-        e.add_field(name="Output tokens", value=f"`{_last_cost['output_tokens']:,}`", inline=True)
-        e.add_field(name="Cache read", value=f"`{_last_cost['cache_read_tokens']:,}`", inline=True)
-    else:
-        e.description = "*No messages yet this session.*"
-    e.timestamp = datetime.now()
-    return e
-
-
-def _embed_alltime() -> discord.Embed:
-    e = discord.Embed(title="📊  All-Time Usage", color=0xEB459E)
-    e.add_field(name="Messages", value=f"`{_totals.get('total_messages', 0):,}`", inline=True)
-    e.add_field(name="Total cost", value=f"`${_totals.get('total_cost_usd', 0.0):.4f}`", inline=True)
-    e.add_field(name="​", value="​", inline=True)
-    e.add_field(name="Input tokens", value=f"`{_totals.get('total_input_tokens', 0):,}`", inline=True)
-    e.add_field(name="Output tokens", value=f"`{_totals.get('total_output_tokens', 0):,}`", inline=True)
-    e.add_field(name="Cache read", value=f"`{_totals.get('total_cache_read_tokens', 0):,}`", inline=True)
     last = _totals.get("last_updated", "—")
-    e.set_footer(text=f"Last updated {last} UTC")
+    e.set_footer(text=f"Updated {last} UTC  ·  !setcredits to adjust balance")
+    e.timestamp = datetime.now()
+    return e
+
+
+def _embed_usage() -> discord.Embed:
+    """Bottom panel — last message + all-time stats."""
+    e = discord.Embed(color=0x5865F2)
+
+    if _last_cost:
+        e.add_field(
+            name="⚡ Last Message",
+            value=(
+                f"**${_last_cost['total_cost_usd']:.5f}**  ·  "
+                f"{_last_cost['duration_ms']} ms  ·  "
+                f"{_last_cost['num_turns']} turn(s)\n"
+                f"📥 {_last_cost['input_tokens']:,} in  "
+                f"📤 {_last_cost['output_tokens']:,} out  "
+                f"⚡ {_last_cost['cache_read_tokens']:,} cached"
+            ),
+            inline=False,
+        )
+    else:
+        e.add_field(name="⚡ Last Message", value="*No messages yet this session.*", inline=False)
+
+    total_msgs = _totals.get("total_messages", 0)
+    total_cost = _totals.get("total_cost_usd", 0.0)
+    total_in = _totals.get("total_input_tokens", 0)
+    total_out = _totals.get("total_output_tokens", 0)
+    total_cache = _totals.get("total_cache_read_tokens", 0)
+
+    e.add_field(
+        name="📊 All-Time",
+        value=(
+            f"**{total_msgs:,}** messages  ·  **${total_cost:.4f}** total\n"
+            f"📥 {total_in:,} in  "
+            f"📤 {total_out:,} out  "
+            f"⚡ {total_cache:,} cached"
+        ),
+        inline=False,
+    )
+
     e.timestamp = datetime.now()
     return e
 
 
 def _all_embeds() -> list[discord.Embed]:
-    return [_embed_status(), _embed_credits(), _embed_last_message(), _embed_alltime()]
+    return [_embed_overview(), _embed_usage()]
 
 
 def _due_reminders() -> list[dict]:
