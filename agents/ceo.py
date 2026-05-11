@@ -12,7 +12,13 @@ CHANNEL_PROMPTS = {
 }
 
 
-async def run_ceo(user_message: str, discord_id: str, display_name: str, channel_type: str = "general") -> tuple[str, dict]:
+async def run_ceo(
+    user_message: str,
+    discord_id: str,
+    display_name: str,
+    channel_type: str = "general",
+    conversation_history: list[tuple[str, str]] | None = None,
+) -> tuple[str, dict]:
     rm = ResourceManager.get_instance()
     prompt_name = CHANNEL_PROMPTS.get(channel_type, "ceo_prompt")
     base_prompt = rm.prompt_loader(prompt_name)
@@ -24,10 +30,15 @@ async def run_ceo(user_message: str, discord_id: str, display_name: str, channel
         f"</CurrentUser>"
     )
 
+    history_context = ""
+    if conversation_history:
+        lines = "\n".join(f"{name}: {msg}" for name, msg in conversation_history)
+        history_context = f"\n<RecentConversation>\n{lines}\n</RecentConversation>"
+
     async for message in query(
         prompt=user_message,
         options=ClaudeAgentOptions(
-            system_prompt=base_prompt + user_context,
+            system_prompt=base_prompt + user_context + history_context,
             model="claude-sonnet-4-6",
             allowed_tools=["Read", "Write", "Edit", "Bash", "WebSearch", "WebFetch"],
             permission_mode="dontAsk",
