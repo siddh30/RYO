@@ -10,8 +10,10 @@
 # Session / deploy notes with server details
 SESSION.md
 
-# Runtime state
+# Runtime state / user data — never commit
 memory/ryo.db
+memory/*.csv
+memory/*.db
 
 # Python
 *__pycache__
