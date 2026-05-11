@@ -71,7 +71,7 @@ STATS_COMMANDS = (
     "`!addwebhook <event> <url>` — register an outbound webhook\n"
     "`!listwebhooks` — list all configured webhooks\n"
     "`!removewebhook <event>` — remove a webhook\n"
-    "`!clear-conversation` — delete all messages in a channel (owner only, <14 days)"
+    "`!clear` — delete all messages in a channel (owner only, <14 days)"
 )
 
 
@@ -363,13 +363,13 @@ class Client(discord.Client):
 
         channel_name = getattr(message.channel, "name", "")
 
-        # !clear-conversation — owner only, deletes all messages in channel (<14 days)
-        if message.content.strip() == "!clear-conversation":
+        # !clear — owner only, deletes all messages in channel (<14 days)
+        if message.content.strip() == "!clear":
             if str(message.author.id) != conf.owner_discord_id:
                 await message.channel.send("🚫 Only the bot owner can clear conversations.")
                 return
             if not isinstance(message.channel, discord.TextChannel):
-                await message.channel.send("⚠️ `!clear-conversation` only works in server channels.")
+                await message.channel.send("⚠️ `!clear` only works in server channels.")
                 return
             try:
                 await message.delete()
