@@ -110,13 +110,40 @@ def _all_embeds() -> list[discord.Embed]:
     return [_embed_credits_dashboard()]
 
 
-_DASHBOARD_KEYWORDS = ("Travel Planner", "RYO — Chat", "Available Actions")
+_DASHBOARD_KEYWORDS = ("Travel Planner", "RYO — Chat", "Available Actions", "Telemetry Logs")
 
 
 def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
     """Return persistent actions embed for a channel. Returns None for ryo-stats (handled separately)."""
     if channel_name == "ryo-stats":
         return None
+
+    if channel_name == "ryo-logs":
+        e = discord.Embed(
+            title="📋  Telemetry Logs",
+            description="Live trace of every agent interaction — tool calls, skill invocations, cost, and timing.",
+            color=0x2B2D31,
+        )
+        e.add_field(
+            name="📊 Each log shows",
+            value=(
+                "🔧 **Skill** invocations (e.g. `travel-deals-agent`, `memory-supervisor`)\n"
+                "🔍 **WebSearch** queries\n"
+                "🌐 **WebFetch** URLs\n"
+                "💻 **Bash** commands (truncated)\n"
+                "📄 **File** reads / writes / edits\n"
+                "💰 Cost · ⏱️ Duration · 📥 Tokens in · 📤 Tokens out · ♻️ Cache hits\n"
+                "❌ Red embed = agent error"
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="⌨️ Commands",
+            value="🔒 `!clear-logs` — purge all logs\n-# 🔒 = owner only",
+            inline=False,
+        )
+        e.set_footer(text="Read-only channel — bot posts here automatically after every interaction")
+        return e
 
     if channel_name == "ryo-travel":
         e = discord.Embed(
@@ -351,7 +378,7 @@ class Client(discord.Client):
         await self._init_channel_dashboards()
 
     async def _init_channel_dashboards(self):
-        active_names = {"ryo-general", "ryo-travel"}
+        active_names = {"ryo-general", "ryo-travel", "ryo-logs"}
         for guild in self.guilds:
             for channel in guild.text_channels:
                 if channel.name not in active_names:
