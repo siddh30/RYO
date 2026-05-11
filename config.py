@@ -12,3 +12,4 @@ class Config():
     prompt_dir_path = f"{base_dir}/prompts"
 
     discord_token = os.getenv('DISCORD_TOKEN')
+    owner_discord_id = os.getenv('OWNER_DISCORD_ID', '')

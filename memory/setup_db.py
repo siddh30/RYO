@@ -12,6 +12,18 @@ PERMANENT_CSV = os.path.join(os.path.dirname(__file__), "Permanent_Memory.csv")
 REMINDERS_CSV = os.path.join(os.path.dirname(__file__), "Reminders.csv")
 
 DDL = """
+CREATE TABLE IF NOT EXISTS cost_tracking (
+    id                      INTEGER PRIMARY KEY CHECK (id = 1),
+    total_cost_usd          REAL    DEFAULT 0.0,
+    total_input_tokens      INTEGER DEFAULT 0,
+    total_output_tokens     INTEGER DEFAULT 0,
+    total_cache_read_tokens INTEGER DEFAULT 0,
+    total_messages          INTEGER DEFAULT 0,
+    credit_balance_usd      REAL    DEFAULT NULL,
+    last_updated            TEXT
+);
+INSERT OR IGNORE INTO cost_tracking (id) VALUES (1);
+
 CREATE TABLE IF NOT EXISTS users (
     discord_id   TEXT PRIMARY KEY,
     username     TEXT,
