@@ -4,6 +4,8 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta
 
+from dateutil import parser as dateparser
+
 import anthropic
 
 sys.path.insert(0, '.')
@@ -141,7 +143,7 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
             value=(
                 "`!travel-preferences` — view your travel profile\n"
                 "`!travel-preferences update` — update saved preferences\n"
-                "`!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>`\n"
+                "`!plan-trip <destination> <start date> <end date>`\n"
                 "    ↳ full itinerary + Discord events + pre-trip reminders\n"
                 "🔒 `!clear` — clear all messages"
             ),
@@ -609,17 +611,17 @@ class Client(discord.Client):
         parts = message.content.strip().split()
         if len(parts) < 4:
             await message.channel.send(
-                "Usage: `!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>`\n"
-                "Example: `!plan-trip Tokyo 2026-06-01 2026-06-07`"
+                "Usage: `!plan-trip <destination> <start date> <end date>`\n"
+                "Example: `!plan-trip Tokyo June-1-2026 June-7-2026`"
             )
             return
 
         destination = parts[1]
         try:
-            start_date = datetime.fromisoformat(parts[2])
-            end_date = datetime.fromisoformat(parts[3])
-        except ValueError:
-            await message.channel.send("Date format must be YYYY-MM-DD. Example: `2026-06-01`")
+            start_date = dateparser.parse(parts[2], dayfirst=False)
+            end_date = dateparser.parse(parts[3], dayfirst=False)
+        except Exception:
+            await message.channel.send("Couldn't parse those dates. Try: `June 1 2026`, `2026-06-01`, or `01/06/2026`.")
             return
 
         days = (end_date - start_date).days + 1
