@@ -487,8 +487,19 @@ class Client(discord.Client):
 
         channel_name = getattr(message.channel, "name", "")
 
-        # ryo-logs is write-only — never respond to messages there
+        # ryo-logs: only !clear-logs works here (owner only)
         if channel_name == "ryo-logs":
+            if message.content.strip() == "!clear-logs":
+                if str(message.author.id) != conf.owner_discord_id:
+                    await message.channel.send("🚫 Only the bot owner can clear logs.")
+                    return
+                try:
+                    await message.delete()
+                except discord.Forbidden:
+                    pass
+                deleted = await message.channel.purge(limit=None)
+                confirm = await message.channel.send(f"🧹 Cleared **{len(deleted)}** log(s).")
+                await confirm.delete(delay=5)
             return
 
         # !clear — owner only, works in any channel
