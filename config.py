@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -6,7 +7,7 @@ load_dotenv()
 
 class Config():
 
-    base_dir = '/Users/siddharth/Desktop/Data-Science-Universe/Projects/LLMS/Ryo'
+    base_dir = str(Path(__file__).parent.resolve())
     memory_path = f"{base_dir}/memory"
     prompt_dir_path = f"{base_dir}/prompts"
 
