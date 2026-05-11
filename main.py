@@ -28,6 +28,7 @@ _totals: dict = {}
 _last_cost: dict = {}
 _session_messages: int = 0
 _stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [status, credits, last_msg, alltime]
+_pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire reply
 
 
 def _sanitize(text: str) -> str:
@@ -59,93 +60,75 @@ def _bar(ratio: float, width: int = 16) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def _embed_overview() -> discord.Embed:
-    """Top panel — status + credits."""
+STATS_COMMANDS = (
+    "`!refresh` — force-refresh this dashboard\n"
+    "`!setcredits <amount>` — update your credit balance\n"
+    "`!addwebhook <event> <url>` — register an outbound webhook\n"
+    "`!listwebhooks` — list all configured webhooks\n"
+    "`!removewebhook <event>` — remove a webhook"
+)
+
+
+def _embed_credits_dashboard() -> discord.Embed:
+    """Single credits dashboard for #ryo-stats."""
     balance = _totals.get("credit_balance_usd")
     spent = _totals.get("total_cost_usd", 0.0)
+    total_msgs = _totals.get("total_messages", 0)
 
     if balance is not None:
         remaining = max(0.0, balance - spent)
         ratio = remaining / balance if balance > 0 else 0.0
         pct = ratio * 100
         color = 0x57F287 if pct > 30 else (0xFEE75C if pct > 10 else 0xED4245)
-    else:
-        color = 0x5865F2
-
-    e = discord.Embed(title="🌀  RYO Dashboard", color=color)
-
-    # Status row
-    e.add_field(name="Status", value="🟢 Online", inline=True)
-    e.add_field(name="Session", value=f"{_session_messages} msg(s)", inline=True)
-    e.add_field(name="Model", value="sonnet-4-6", inline=True)
-
-    # Credits section
-    if balance is not None:
         bar = _bar(ratio)
-        e.add_field(
-            name="💳 Credits",
-            value=(
-                f"{bar} **{pct:.1f}%**\n"
-                f"**${remaining:.2f}** remaining  ·  ${spent:.4f} spent  ·  [billing]({BILLING_URL})"
-            ),
-            inline=False,
+        desc = (
+            f"{bar}  **{pct:.1f}%**\n\n"
+            f"💰 **${remaining:.2f}** remaining  ·  **${spent:.4f}** consumed\n"
+            f"📨 **{total_msgs:,}** messages  ·  [Top up]({BILLING_URL})"
         )
     else:
-        e.add_field(
-            name="💳 Credits",
-            value=f"Use `!setcredits <amount>` to set balance  ·  [billing]({BILLING_URL})",
-            inline=False,
-        )
+        color = 0x99AAB5
+        desc = f"No balance set.\n[Check billing]({BILLING_URL})"
 
+    e = discord.Embed(title="💳  Credits Remaining", description=desc, color=color)
+    e.add_field(name="⌨️ Commands", value=STATS_COMMANDS, inline=False)
     last = _totals.get("last_updated", "—")
-    e.set_footer(text=f"Updated {last} UTC  ·  !setcredits to adjust balance")
-    e.timestamp = datetime.now()
-    return e
-
-
-def _embed_usage() -> discord.Embed:
-    """Bottom panel — last message + all-time stats."""
-    e = discord.Embed(color=0x5865F2)
-
-    if _last_cost:
-        e.add_field(
-            name="⚡ Last Message",
-            value=(
-                f"**${_last_cost['total_cost_usd']:.5f}**  ·  "
-                f"{_last_cost['duration_ms']} ms  ·  "
-                f"{_last_cost['num_turns']} turn(s)\n"
-                f"📥 {_last_cost['input_tokens']:,} in  "
-                f"📤 {_last_cost['output_tokens']:,} out  "
-                f"⚡ {_last_cost['cache_read_tokens']:,} cached"
-            ),
-            inline=False,
-        )
-    else:
-        e.add_field(name="⚡ Last Message", value="*No messages yet this session.*", inline=False)
-
-    total_msgs = _totals.get("total_messages", 0)
-    total_cost = _totals.get("total_cost_usd", 0.0)
-    total_in = _totals.get("total_input_tokens", 0)
-    total_out = _totals.get("total_output_tokens", 0)
-    total_cache = _totals.get("total_cache_read_tokens", 0)
-
-    e.add_field(
-        name="📊 All-Time",
-        value=(
-            f"**{total_msgs:,}** messages  ·  **${total_cost:.4f}** total\n"
-            f"📥 {total_in:,} in  "
-            f"📤 {total_out:,} out  "
-            f"⚡ {total_cache:,} cached"
-        ),
-        inline=False,
-    )
-
+    e.set_footer(text=f"Last updated {last} UTC")
     e.timestamp = datetime.now()
     return e
 
 
 def _all_embeds() -> list[discord.Embed]:
-    return [_embed_overview(), _embed_usage()]
+    return [_embed_credits_dashboard()]
+
+
+TRAVEL_PREF_QUESTIONNAIRE = """✈️ Let's set up your travel profile! Reply with your answers:
+
+**1.** 💳 Credit cards you carry *(e.g. Amex Gold, Chase Sapphire, Visa Infinite)*
+**2.** 🍽️ Favourite cuisines *(e.g. Japanese, Italian, Mexican)*
+**3.** 🚗 Can you drive? *(yes / no)*
+**4.** 💰 Budget style *(budget / mid-range / luxury)*
+**5.** 🏨 Accommodation preference *(hotel / Airbnb / hostel / any)*
+**6.** 🎒 Travel style *(adventure / relaxing / cultural / foodie / mix)*
+**7.** 🥗 Dietary restrictions *(none / vegetarian / vegan / halal / other)*
+
+Reply with numbered answers and I'll save them to your profile!"""
+
+TRAVEL_COMMANDS = (
+    "`!travel-preferences` — view or set up your travel profile\n"
+    "`!refresh` — re-fetch your preferences"
+)
+
+
+def _get_travel_preferences(discord_id: str) -> str | None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT context FROM permanent_memories WHERE discord_id = ? AND LOWER(index_title) LIKE '%travel%pref%'",
+        (discord_id,),
+    ).fetchone()
+    conn.close()
+    return row["context"] if row else None
 
 
 def _due_reminders() -> list[dict]:
@@ -371,11 +354,18 @@ class Client(discord.Client):
 
         channel_name = getattr(message.channel, "name", "")
 
-        # ryo-stats: only cost/webhook commands are allowed
+        # ryo-stats: only cost/webhook commands allowed
         if channel_name == "ryo-stats":
-            if not message.content.strip().startswith("!"):
-                await message.channel.send("📊 This channel is for cost diagnostics only. Ask Ryo in any other channel!")
-            return
+            if message.content.strip() == "!refresh":
+                if message.guild:
+                    await self._update_stats_panel(message.guild)
+            elif not message.content.strip().startswith("!"):
+                await message.channel.send("📊 This channel shows cost diagnostics only. Chat with Ryo in **#general**!")
+            # fall through so !setcredits / !addwebhook etc. are handled below
+            else:
+                pass  # handled by the command blocks below
+            if message.content.strip() == "!refresh" or not message.content.strip().startswith("!"):
+                return
 
         discord_id = str(message.author.id)
         display_name = message.author.display_name
@@ -387,6 +377,29 @@ class Client(discord.Client):
             await dispatch("new_user", {"discord_id": discord_id, "display_name": display_name})
 
         channel_type = "travel" if channel_name == "ryo-travel" else "general"
+
+        # !travel-preferences — show or collect travel prefs
+        if channel_name == "ryo-travel" and message.content.strip() in ("!travel-preferences", "!refresh"):
+            prefs = _get_travel_preferences(discord_id)
+            if prefs:
+                await message.channel.send(
+                    f"🗺️ **Your travel profile, {display_name}:**\n\n{prefs}\n\n"
+                    f"Want to update? Just type `!travel-preferences update`."
+                )
+            else:
+                _pending_travel_prefs.add(discord_id)
+                await message.channel.send(TRAVEL_PREF_QUESTIONNAIRE)
+            return
+
+        if channel_name == "ryo-travel" and message.content.strip() == "!travel-preferences update":
+            _pending_travel_prefs.add(discord_id)
+            await message.channel.send(TRAVEL_PREF_QUESTIONNAIRE)
+            return
+
+        # Pending pref reply — save via CEO with save prompt
+        if channel_name == "ryo-travel" and discord_id in _pending_travel_prefs:
+            _pending_travel_prefs.discard(discord_id)
+            channel_type = "travel_preferences_save"
 
         async with message.channel.typing():
             response, cost_info = await run_ceo(

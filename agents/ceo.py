@@ -8,6 +8,7 @@ from utils.resource_manager import ResourceManager
 
 CHANNEL_PROMPTS = {
     "travel": "travel_prompt",
+    "travel_preferences_save": "travel_preferences_save",
 }
 
 
