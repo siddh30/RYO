@@ -10,7 +10,6 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'memory', 'ryo.db')
 
 
 def _get_all_travel_prefs(guild_id: int | None = None) -> list[dict]:
-    """Return travel preferences for all users who have them saved."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -23,7 +22,6 @@ def _get_all_travel_prefs(guild_id: int | None = None) -> list[dict]:
 
 
 def _store_trip_reminders(discord_id: str, trip_name: str, start_date: datetime):
-    """Insert pre-trip reminder rows for 7 days, 2 days, and day before departure."""
     checkpoints = [
         (7,  f"1 week until {trip_name}! Check visas, travel docs, and accommodation."),
         (2,  f"2 days until {trip_name}! Start packing and confirm bookings."),
@@ -47,10 +45,6 @@ def _store_trip_reminders(discord_id: str, trip_name: str, start_date: datetime)
 
 
 async def extract_trip_events(itinerary_text: str, destination: str, start_date: datetime) -> list[dict]:
-    """
-    Ask Claude to parse the itinerary into structured day events.
-    Returns list of {day, title, description, date_iso} dicts.
-    """
     client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
     prompt = (
         f"Extract the day-by-day events from this travel itinerary for {destination} "
@@ -65,7 +59,6 @@ async def extract_trip_events(itinerary_text: str, destination: str, start_date:
         messages=[{"role": "user", "content": prompt}],
     )
     raw = resp.content[0].text.strip()
-    # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -73,23 +66,68 @@ async def extract_trip_events(itinerary_text: str, destination: str, start_date:
     return json.loads(raw.strip())
 
 
+def event_title(destination: str, day: int, title: str) -> str:
+    return f"{destination}: Day {day} — {title}"
+
+
+async def get_existing_event_names(guild: discord.Guild) -> dict[str, discord.ScheduledEvent]:
+    """Return {event_name: event} for all scheduled events in the guild."""
+    try:
+        events = await guild.fetch_scheduled_events()
+        return {ev.name: ev for ev in events}
+    except Exception:
+        return {}
+
+
+async def delete_all_guild_events(guild: discord.Guild) -> int:
+    """Delete every scheduled event in the guild. Returns count deleted."""
+    events = await guild.fetch_scheduled_events()
+    count = 0
+    for ev in events:
+        try:
+            await ev.delete()
+            count += 1
+        except Exception as e:
+            print(f"Could not delete event {ev.name}: {e}")
+    return count
+
+
 async def create_discord_events(
     guild: discord.Guild,
     events: list[dict],
     destination: str,
     start_date: datetime,
+    replace_names: set[str] | None = None,
+    skip_names: set[str] | None = None,
 ) -> list[str]:
-    """Create one Discord Scheduled Event per day. Returns list of created event names."""
+    """
+    Create one Discord Scheduled Event per day.
+    replace_names: delete these existing events first, then recreate.
+    skip_names: skip these entirely.
+    Returns list of created event titles.
+    """
     created = []
     tz = timezone.utc
+    existing = await get_existing_event_names(guild) if replace_names else {}
 
     for ev in events:
+        name = event_title(destination, ev["day"], ev["title"])
+
+        if skip_names and name in skip_names:
+            continue
+
+        if replace_names and name in replace_names and name in existing:
+            try:
+                await existing[name].delete()
+            except Exception:
+                pass
+
         try:
             date = datetime.fromisoformat(ev["date_iso"]).replace(tzinfo=tz)
             start = date.replace(hour=9, minute=0)
             end = date.replace(hour=22, minute=0)
             await guild.create_scheduled_event(
-                name=f"✈️ Day {ev['day']} — {ev['title']}",
+                name=name,
                 description=ev.get("description", ""),
                 start_time=start,
                 end_time=end,

@@ -18,6 +18,7 @@ from agents.vision import run_vision
 from agents.trip_planner import (
     _get_all_travel_prefs, _store_trip_reminders,
     extract_trip_events, create_discord_events,
+    get_existing_event_names, delete_all_guild_events, event_title,
 )
 from memory.register_user import register_user
 from memory import cost_db
@@ -38,6 +39,7 @@ _session_messages: int = 0
 _stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [embed messages]
 _channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persistent dashboard
 _pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire
+_pending_trip_events: dict[int, dict] = {}  # channel_id -> pending duplicate-confirmation state
 _conversation_history: dict[int, list[tuple[str, str]]] = {}  # channel_id -> [(speaker, message), ...]
 _channel_input_tokens: dict[int, int] = {}  # channel_id -> latest input_tokens
 
@@ -145,6 +147,7 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
                 "`!travel-preferences update` — update saved preferences\n"
                 "`!plan-trip <destination> <start date> <end date>`\n"
                 "    ↳ full itinerary + Discord events + pre-trip reminders\n"
+                "`!clear-events` — delete all scheduled events in the server\n"
                 "🔒 `!clear` — clear all messages"
             ),
             inline=False,
@@ -555,6 +558,19 @@ class Client(discord.Client):
                 await self._update_stats_panel(message.guild)
             return
 
+        # !clear-events — ryo-travel only
+        if channel_name == "ryo-travel" and message.content.strip() == "!clear-events":
+            if not message.guild:
+                return
+            count = await delete_all_guild_events(message.guild)
+            await message.channel.send(f"🗑️ Deleted **{count}** scheduled event(s).")
+            return
+
+        # Pending duplicate-event confirmation
+        if channel_name == "ryo-travel" and message.channel.id in _pending_trip_events:
+            await self._handle_event_confirm_reply(message)
+            return
+
         # !plan-trip — ryo-travel only
         if channel_name == "ryo-travel" and message.content.strip().startswith("!plan-trip"):
             await self._handle_plan_trip(message, discord_id, display_name)
@@ -688,23 +704,61 @@ class Client(discord.Client):
             await message.channel.send(chunk)
 
         if message.guild:
-            await message.channel.send("📅 Creating Discord events for each day…")
+            await message.channel.send("📅 Preparing Discord events…")
             try:
                 events = await extract_trip_events(itinerary, destination, start_date)
-                created = await create_discord_events(message.guild, events, destination, start_date)
-                if created:
+                existing = await get_existing_event_names(message.guild)
+                duplicate_names = {
+                    event_title(destination, ev["day"], ev["title"])
+                    for ev in events
+                    if event_title(destination, ev["day"], ev["title"]) in existing
+                }
+
+                if duplicate_names:
+                    dup_list = "\n".join(f"• {n}" for n in sorted(duplicate_names))
+                    _pending_trip_events[message.channel.id] = {
+                        "guild": message.guild,
+                        "events": events,
+                        "destination": destination,
+                        "start_date": start_date,
+                        "discord_id": discord_id,
+                        "display_name": display_name,
+                        "duplicate_names": duplicate_names,
+                        "cost_info": cost_info,
+                    }
                     await message.channel.send(
-                        f"✅ Created **{len(created)}** Discord events! Check the Events tab in your server.\n"
-                        f"⏰ Setting pre-trip reminders for you…"
+                        f"⚠️ **{len(duplicate_names)}** event(s) already exist:\n{dup_list}\n\n"
+                        f"Replace them? Reply `yes` to replace all, `no` to skip duplicates."
                     )
-                else:
-                    await message.channel.send("⚠️ Could not create Discord events — check the bot has **Manage Events** permission.")
+                    return
+
+                await self._finish_creating_events(
+                    message.channel, message.guild, events, destination,
+                    start_date, discord_id, display_name, cost_info,
+                )
+                return
             except Exception as e:
                 print(f"Trip event creation error: {e}")
                 await message.channel.send("⚠️ Itinerary ready but couldn't create Discord events.")
 
+    async def _finish_creating_events(
+        self, channel, guild, events, destination, start_date,
+        discord_id, display_name, cost_info,
+        replace_names=None, skip_names=None,
+    ):
+        created = await create_discord_events(
+            guild, events, destination, start_date,
+            replace_names=replace_names, skip_names=skip_names,
+        )
+        if created:
+            await channel.send(
+                f"✅ Created **{len(created)}** Discord events! Check the Events tab in your server."
+            )
+        else:
+            await channel.send("⚠️ Could not create Discord events — check the bot has **Manage Events** permission.")
+
         _store_trip_reminders(discord_id, f"{destination} trip", start_date)
-        await message.channel.send(
+        await channel.send(
             f"⏰ Pre-trip reminders set for **{display_name}** — 7 days, 2 days, and 1 day before departure."
         )
 
@@ -716,8 +770,36 @@ class Client(discord.Client):
             _totals = cost_db.load()
             await self._check_low_credit()
 
-        if message.guild:
-            await self._update_stats_panel(message.guild)
+        if guild:
+            await self._update_stats_panel(guild)
+
+    async def _handle_event_confirm_reply(self, message: discord.Message):
+        channel_id = message.channel.id
+        pending = _pending_trip_events.pop(channel_id, None)
+        if not pending:
+            return
+
+        reply = message.content.strip().lower()
+        if reply in ("yes", "y", "replace", "replace all", "yes all"):
+            await message.channel.send("🔄 Replacing duplicates and creating all events…")
+            await self._finish_creating_events(
+                message.channel, pending["guild"], pending["events"],
+                pending["destination"], pending["start_date"],
+                pending["discord_id"], pending["display_name"], pending["cost_info"],
+                replace_names=pending["duplicate_names"],
+            )
+        elif reply in ("no", "n", "skip", "skip all"):
+            await message.channel.send("⏭️ Skipping duplicates, creating new events only…")
+            await self._finish_creating_events(
+                message.channel, pending["guild"], pending["events"],
+                pending["destination"], pending["start_date"],
+                pending["discord_id"], pending["display_name"], pending["cost_info"],
+                skip_names=pending["duplicate_names"],
+            )
+        else:
+            # Put it back and re-ask
+            _pending_trip_events[channel_id] = pending
+            await message.channel.send("Reply `yes` to replace duplicates or `no` to skip them.")
 
     async def _compress_and_notify(self, channel_id: int, channel):
         await _compress_history(channel_id)
