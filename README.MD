@@ -26,51 +26,60 @@ RYO routes conversations by channel — each one has a focused purpose.
 
 | Channel | Purpose |
 |---|---|
-| `#general` | News, web search, weather, memory, reminders — everything |
+| `#ryo-general` | News, web search, weather, memory, reminders — everything |
 | `#ryo-travel` | Trip itineraries and travel planning only |
 | `#ryo-stats` | Live cost and credit dashboard |
 
-Off-topic messages in a specialized channel are automatically redirected and answered in `#general`.
+Off-topic messages in a specialised channel are automatically redirected and answered in `#ryo-general`.
 
 ---
 
 ## Capabilities
 
-**In `#general`:**
+**In `#ryo-general`:**
 - 📰 **News** — *"What's in the news?"* — fetches live headlines
 - 🔍 **Web search** — *"Look up X"* / *"Find info on Y"*
 - 🌤️ **Weather** — *"What's the weather in Tokyo?"* — always in Celsius
 - 🧠 **Remember** — *"Remember I'm a VP at JPMorgan"*
 - 🗑️ **Forget** — *"Forget my address"*
 - ⏰ **Reminders** — *"Remind me at 3pm"* / *"Remind me 3 times every 10 minutes"* / *"Keep reminding me until I say stop"*
+- 📸 **Images & PDFs** — attach a file and ask a question — Ryo can analyse it
 
 **In `#ryo-travel`:**
-- 🗺️ Full day-by-day itineraries with hotels, food, budget breakdown
+- 🗺️ Full day-by-day itineraries with hotels, food, and budget breakdown
 - 🎒 Personalised to your travel profile (card type, cuisine, driving, budget style)
-- `!travel-preferences` — view or set up your travel profile
-- `!travel-preferences update` — update your saved preferences
+- 📅 Creates Discord Scheduled Events for each day of the trip
+- ⏰ Automatically sets pre-trip reminders (7 days, 2 days, 1 day before departure)
+- 📸 **Images & PDFs** — attach a file and ask a question — Ryo can analyse it
 
 ---
 
 ## Commands
 
-Available in any channel:
+### `#ryo-general`
 
 | Command | What it does |
 |---|---|
-| `!clear-conversation` | Delete all RYO messages in this channel |
+| 🔒 `!clear` | Delete all RYO messages in this channel *(owner only)* |
 
-`#ryo-stats` only:
+### `#ryo-travel`
+
+| Command | What it does |
+|---|---|
+| `!travel-preferences` | View or set up your travel profile |
+| `!travel-preferences update` | Update your saved travel preferences |
+| `!plan-trip <destination> <start YYYY-MM-DD> <end YYYY-MM-DD>` | Generate full itinerary + Discord events + reminders |
+| 🔒 `!clear` | Delete all messages in this channel *(owner only)* |
+
+### `#ryo-stats`
 
 | Command | What it does |
 |---|---|
 | `!refresh` | Force-refresh the credits dashboard |
-| `!setcredits <amount>` | Set your current credit balance *(owner only)* |
-| `!addwebhook <event> <url>` | Register an outbound webhook *(owner only)* |
-| `!listwebhooks` | List configured webhooks *(owner only)* |
-| `!removewebhook <event>` | Remove a webhook *(owner only)* |
+| 🔒 `!setcredits <amount>` | Set your current credit balance *(owner only)* |
+| 🔒 `!clear` | Delete all messages in this channel *(owner only)* |
 
-**Webhook events:** `reminder` · `low_credit` · `new_user` · `message`
+> Commands are channel-scoped — `!setcredits` only works in `#ryo-stats`, travel commands only in `#ryo-travel`, etc.
 
 ---
 
@@ -93,22 +102,23 @@ Available in any channel:
 flowchart TD
     A([Discord Message]) --> B[channel router\nmain.py]
 
-    B -->|ryo-stats| C[commands only\n!setcredits · !refresh · !addwebhook]
+    B -->|ryo-stats| C[commands only\n!setcredits · !refresh · !clear]
     B -->|ryo-travel| D[travel CEO\ntravel_prompt.txt]
-    B -->|general or other| E[general CEO\nceo_prompt.txt]
+    B -->|ryo-general or other| E[general CEO\nceo_prompt.txt]
 
     D -->|off-topic| E
     D -->|!travel-preferences reply| F[travel_preferences_save prompt\n→ memory-supervisor skill]
+    D -->|!plan-trip| G[trip planner\n→ itinerary + Discord events + reminders]
 
-    E --> G{claude-agent-sdk\nclaude-sonnet-4-6}
-    G -->|news| H[news-agent skill]
-    G -->|search / weather| I[search-agent skill]
-    G -->|remember / remind / forget| J[memory-supervisor skill]
-    J --> K[(ryo.db · SQLite)]
+    E --> H{claude-agent-sdk\nclaude-sonnet-4-6}
+    H -->|news| I[news-agent skill]
+    H -->|search / weather| J[search-agent skill]
+    H -->|remember / remind / forget| K[memory-supervisor skill]
+    K --> L[(ryo.db · SQLite)]
 
-    G --> L[Response]
-    L --> M[sanitize + chunk]
-    M --> N([Discord reply])
+    H --> M[Response]
+    M --> N[sanitize + chunk]
+    N --> O([Discord reply])
 ```
 
 ### Proactive Reminder Loop
@@ -157,12 +167,6 @@ erDiagram
         REAL credit_balance_usd
         INTEGER total_messages
         INTEGER low_credit_alerted
-    }
-    webhooks {
-        INTEGER id PK
-        TEXT event
-        TEXT url
-        TEXT label
     }
     users ||--o{ permanent_memories : has
     users ||--o{ reminders : has
@@ -221,7 +225,7 @@ Safe to re-run — creates tables if missing, migrates existing CSV data.
 python main.py
 ```
 
-RYO auto-creates `#ryo-stats`, `#ryo-travel`, and `#general` channels on first start if they don't exist.
+RYO auto-creates `#ryo-stats`, `#ryo-travel`, and `#ryo-general` channels on first start if they don't exist.
 
 ---
 
