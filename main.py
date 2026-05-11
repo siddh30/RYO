@@ -669,17 +669,17 @@ class Client(discord.Client):
 
     def _get_general_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
         preferred = discord.utils.get(guild.text_channels, name="ryo-general")
-        if preferred and guild.me.permissions_in(preferred).send_messages:
+        if preferred and preferred.permissions_for(guild.me).send_messages:
             return preferred
         specialized = {"ryo-stats", "ryo-travel", "ryo-logs"}
         for ch in guild.text_channels:
-            if ch.name not in specialized and guild.me.permissions_in(ch).send_messages:
+            if ch.name not in specialized and ch.permissions_for(guild.me).send_messages:
                 return ch
         return None
 
     def _get_logs_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
         ch = discord.utils.get(guild.text_channels, name="ryo-logs")
-        return ch if ch and guild.me.permissions_in(ch).send_messages else None
+        return ch if ch and ch.permissions_for(guild.me).send_messages else None
 
     async def _post_log(
         self,
