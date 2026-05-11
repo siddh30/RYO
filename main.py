@@ -20,6 +20,17 @@ DB_PATH = f"{conf.memory_path}/ryo.db"
 intents = discord.Intents.default()
 intents.message_content = True
 
+_session_stats = {
+    "messages": 0,
+    "total_cost_usd": 0.0,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cache_read_tokens": 0,
+    "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+}
+_last_cost: dict = {}
+_stats_messages: dict[int, discord.Message] = {}  # guild_id -> pinned stats message
+
 
 def _sanitize(text: str) -> str:
     text = re.sub(r'^#{1,6}\s+(.+)$', r'**\1**', text, flags=re.MULTILINE)
@@ -45,8 +56,38 @@ def _chunk(text: str) -> list[str]:
     return chunks or [""]
 
 
+def _build_stats_embed() -> discord.Embed:
+    embed = discord.Embed(title="📊 RYO Cost Diagnostics", color=0x5865F2)
+
+    if _last_cost:
+        embed.add_field(
+            name="Last Message",
+            value=(
+                f"💰 `${_last_cost['total_cost_usd']:.5f}`\n"
+                f"⏱️ `{_last_cost['duration_ms']} ms` · `{_last_cost['num_turns']}` turn(s)\n"
+                f"📥 `{_last_cost['input_tokens']:,}` in · `{_last_cost['output_tokens']:,}` out\n"
+                f"⚡ Cache read `{_last_cost['cache_read_tokens']:,}` · created `{_last_cost['cache_creation_tokens']:,}`"
+            ),
+            inline=False,
+        )
+
+    embed.add_field(
+        name="Session Total",
+        value=(
+            f"💬 `{_session_stats['messages']}` message(s)\n"
+            f"💰 `${_session_stats['total_cost_usd']:.5f}`\n"
+            f"📥 `{_session_stats['total_input_tokens']:,}` in · `{_session_stats['total_output_tokens']:,}` out\n"
+            f"⚡ Cache read `{_session_stats['total_cache_read_tokens']:,}`"
+        ),
+        inline=False,
+    )
+
+    embed.set_footer(text=f"Session started {_session_stats['started_at']} UTC · updates after every message")
+    embed.timestamp = datetime.now()
+    return embed
+
+
 def _due_reminders() -> list[dict]:
-    """Return all reminders whose remember_window has passed, for real users only."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -75,7 +116,6 @@ def _delete_reminder(row_id: int):
 
 
 def _reschedule_reminder(row_id: int, interval_mins: int, new_count: int):
-    """Decrement repeat_count (or keep -1 for infinite) and push remember_window forward."""
     next_window = (datetime.now() + timedelta(minutes=interval_mins)).isoformat()
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
@@ -90,6 +130,37 @@ class Client(discord.Client):
     async def on_ready(self):
         print(f"Logged on as {self.user}!")
         self.reminder_loop.start()
+        await self._init_stats_panels()
+
+    async def _init_stats_panels(self):
+        """Find or create the ryo-stats message in every guild."""
+        for guild in self.guilds:
+            channel = discord.utils.get(guild.text_channels, name="ryo-stats")
+            if not channel:
+                continue
+            # Try to reuse the most recent bot message in that channel
+            async for msg in channel.history(limit=20):
+                if msg.author == self.user and msg.embeds:
+                    _stats_messages[guild.id] = msg
+                    break
+            else:
+                msg = await channel.send(embed=_build_stats_embed())
+                _stats_messages[guild.id] = msg
+
+    async def _update_stats_panel(self, guild: discord.Guild):
+        """Edit the stats embed for this guild."""
+        if guild.id not in _stats_messages:
+            channel = discord.utils.get(guild.text_channels, name="ryo-stats")
+            if not channel:
+                return
+            msg = await channel.send(embed=_build_stats_embed())
+            _stats_messages[guild.id] = msg
+            return
+        try:
+            await _stats_messages[guild.id].edit(embed=_build_stats_embed())
+        except discord.NotFound:
+            _stats_messages.pop(guild.id, None)
+            await self._update_stats_panel(guild)
 
     @tasks.loop(minutes=1)
     async def reminder_loop(self):
@@ -101,7 +172,6 @@ class Client(discord.Client):
             snooze_interval = reminder.get("snooze_interval_mins") or 30
             delivered = False
 
-            # Build message — add repeat info when relevant
             if repeat_count == -1:
                 footer = f"\n*Repeating every {snooze_interval} min · say \"stop reminding me about this\" to cancel*"
             elif repeat_count > 1:
@@ -138,10 +208,8 @@ class Client(discord.Client):
                 if repeat_count == 1:
                     _delete_reminder(reminder["id"])
                 elif repeat_count == -1:
-                    # Infinite snooze — keep repeating
                     _reschedule_reminder(reminder["id"], snooze_interval, -1)
                 else:
-                    # N times — decrement and reschedule
                     _reschedule_reminder(reminder["id"], snooze_interval, repeat_count - 1)
                 print(f"Pinged {discord_id}: {index_title} (repeat_count={repeat_count})")
 
@@ -158,13 +226,26 @@ class Client(discord.Client):
             print(f"New user registered: {display_name} ({discord_id})")
 
         async with message.channel.typing():
-            response = await run_ceo(
+            response, cost_info = await run_ceo(
                 user_message=message.content.strip(),
                 discord_id=discord_id,
                 display_name=display_name,
             )
-            for chunk in _chunk(_sanitize(response)):
-                await message.channel.send(chunk)
+
+        if cost_info:
+            global _last_cost
+            _last_cost = cost_info
+            _session_stats["messages"] += 1
+            _session_stats["total_cost_usd"] += cost_info["total_cost_usd"]
+            _session_stats["total_input_tokens"] += cost_info["input_tokens"]
+            _session_stats["total_output_tokens"] += cost_info["output_tokens"]
+            _session_stats["total_cache_read_tokens"] += cost_info["cache_read_tokens"]
+
+        for chunk in _chunk(_sanitize(response)):
+            await message.channel.send(chunk)
+
+        if message.guild:
+            await self._update_stats_panel(message.guild)
 
 
 client = Client(intents=intents)

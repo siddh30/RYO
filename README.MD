@@ -171,6 +171,51 @@ python main.py
 
 ---
 
+## ☁️ Oracle Cloud Deployment
+
+RYO runs 24/7 on Oracle Cloud (Ubuntu, `pilot` branch). Deploy scripts live in `deploy/`:
+
+```
+deploy/
+├── setup.sh                 ← one-shot server provisioning script
+├── ryo.service              ← systemd unit (auto-start on reboot)
+└── requirements-server.txt  ← minimal server dependencies
+```
+
+**Provision a fresh instance:**
+```bash
+bash deploy/setup.sh
+```
+
+**Manage the service:**
+```bash
+sudo systemctl status ryo      # check status
+sudo journalctl -u ryo -f      # live logs
+sudo systemctl restart ryo     # restart after a git pull
+```
+
+**Deploy an update:**
+```bash
+# local
+git push
+
+# on server
+cd /home/ubuntu/Ryo && git pull && sudo systemctl restart ryo
+```
+
+---
+
+## 📊 Cost Diagnostics
+
+Create a `#ryo-stats` channel in your Discord server. RYO posts a live embed there that updates after every message showing:
+
+- **Last message** — cost in USD, latency, input/output tokens, cache hits
+- **Session totals** — cumulative cost, message count, total tokens
+
+No commands needed — the panel updates automatically.
+
+---
+
 ## ✅ Status
 
 ### Shipped
@@ -181,6 +226,8 @@ python main.py
 - ✅ Proactive reminder pinging with repeat / snooze support
 - ✅ Discord-optimized response formatting
 - ✅ Auto user registration on first message
+- ✅ Oracle Cloud deployment (systemd, 24/7 uptime)
+- ✅ Live cost diagnostics panel (`#ryo-stats` embed)
 
 ### Roadmap
 - ⏳ Goal tracking (fitness, career, personal)
