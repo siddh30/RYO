@@ -1,74 +1,114 @@
 # 🌀 RYO — Work in Balance. Life in Flow.
 
-> **Unlike other AI assistants where you go to them — RYO comes to you.** 😎🔥
+> **Your AI co-pilot, living inside Discord.**
 
-RYO is your autonomous life-balance partner living right inside Discord. It protects your personal time from work chaos, keeps you informed, remembers what matters, and proactively pings you before life slips through the cracks — all without you lifting a finger.
-
----
-
-## ✨ Why RYO?
-
-Most AI tools wait to be asked. RYO doesn't.
-
-- 🗞️ **Stay informed** — get personalized news headlines without doomscrolling
-- 🧠 **Never forget** — RYO remembers your context so you don't have to repeat yourself
-- ⏰ **Be proactive** — set smart reminders that chase *you*, not the other way around
-- 🌤️ **Stay prepared** — instant weather for any city before you step out
-- 💬 **Just talk naturally** — no commands, no syntax, just plain English in your Discord server
+RYO is a multi-agent Discord bot powered by Claude that keeps you informed, remembers what matters, plans your trips, and pings you before things slip — all through plain conversation in your server.
 
 ---
 
-## 🤖 What RYO Can Do Today
+## What RYO Does
 
-| Capability | Example |
+**💬 Just talk naturally.** No slash commands, no syntax. Ask in plain English — RYO figures out what you need.
+
+**🧠 Remembers you.** Every user gets their own isolated memory. Tell RYO something once and it uses it forever.
+
+**⏰ Chases you.** Reminders come to you — in DMs or your channel — on a schedule you define.
+
+**✈️ Plans your travel.** Dedicated travel channel with your personal preferences profile built in.
+
+**📊 Tracks its own cost.** Live credit dashboard so you always know what's being spent.
+
+---
+
+## Channels
+
+RYO routes conversations by channel — each one has a focused purpose.
+
+| Channel | Purpose |
 |---|---|
-| 📰 **Personalized news** | *"What's in the news?"* — tailored to your saved preferences |
-| 🔍 **Web search** | *"Find me info on X"* / *"Look up Y"* |
-| 🌤️ **Weather** | *"What's the weather in Jersey City?"* |
-| 🧠 **Permanent memory** | *"Remember that I'm a VP at JPMorgan"* |
-| ⏰ **Reminders** | *"Remind me to submit my report by Friday"* |
-| 🔁 **Repeat reminders** | *"Remind me 3 times every 10 minutes"* / *"Keep reminding me until I say stop"* |
-| 👤 **Per-user profiles** | Each Discord user gets their own isolated memory and preferences |
-| 🗑️ **Forget** | *"Forget my address"* / *"Stop reminding me about X"* |
+| `#general` | News, web search, weather, memory, reminders — everything |
+| `#ryo-travel` | Trip itineraries and travel planning only |
+| `#ryo-stats` | Live cost and credit dashboard |
+
+Off-topic messages in a specialized channel are automatically redirected and answered in `#general`.
 
 ---
 
-## 🚀 Coming Soon
+## Capabilities
 
-RYO is growing into a full life-management co-pilot:
+**In `#general`:**
+- 📰 **News** — *"What's in the news?"* — fetches live headlines
+- 🔍 **Web search** — *"Look up X"* / *"Find info on Y"*
+- 🌤️ **Weather** — *"What's the weather in Tokyo?"* — always in Celsius
+- 🧠 **Remember** — *"Remember I'm a VP at JPMorgan"*
+- 🗑️ **Forget** — *"Forget my address"*
+- ⏰ **Reminders** — *"Remind me at 3pm"* / *"Remind me 3 times every 10 minutes"* / *"Keep reminding me until I say stop"*
 
-- 🎯 **Goal tracking** — set fitness, career, and personal goals; RYO nudges you on progress
-- 🥗 **Meal prep** — smart recipes and food inventory management
-- 💪 **Gym routine** — weekly workout tracking with adaptive scheduling
-- 📅 **Daily briefings** — proactive morning summaries tailored to your day
-- 🌐 **Full beta release** — polished, invite-ready for your whole server
+**In `#ryo-travel`:**
+- 🗺️ Full day-by-day itineraries with hotels, food, budget breakdown
+- 🎒 Personalised to your travel profile (card type, cuisine, driving, budget style)
+- `!travel-preferences` — view or set up your travel profile
+- `!travel-preferences update` — update your saved preferences
 
 ---
 
-## 🏗️ Architecture
+## Commands
 
-### Request Flow
+Available in any channel:
+
+| Command | What it does |
+|---|---|
+| `!clear-conversation` | Delete all RYO messages in this channel |
+
+`#ryo-stats` only:
+
+| Command | What it does |
+|---|---|
+| `!refresh` | Force-refresh the credits dashboard |
+| `!setcredits <amount>` | Set your current credit balance *(owner only)* |
+| `!addwebhook <event> <url>` | Register an outbound webhook *(owner only)* |
+| `!listwebhooks` | List configured webhooks *(owner only)* |
+| `!removewebhook <event>` | Remove a webhook *(owner only)* |
+
+**Webhook events:** `reminder` · `low_credit` · `new_user` · `message`
+
+---
+
+## Cost Dashboard
+
+`#ryo-stats` shows a live embed that updates after every message:
+
+- Credit bar with % remaining (green → yellow → red as balance drops)
+- Remaining vs. consumed breakdown
+- Direct link to billing page
+- Low-credit DM alert when balance drops below $5
+
+---
+
+## Architecture
+
+### Channel Routing
 
 ```mermaid
 flowchart TD
-    A([Discord Message]) --> B[main.py\non_message handler]
-    B --> C[register_user\nauto-register on first message]
-    C --> D[run_ceo\nagents/ceo.py]
-    D --> E{claude-agent-sdk\nclaude-sonnet-4-6}
+    A([Discord Message]) --> B[channel router\nmain.py]
 
-    E -->|news request| F[🗞️ news-agent skill\nWebSearch + WebFetch]
-    E -->|search / weather| G[🔍 search-agent skill\nWebSearch + WebFetch + Bash]
-    E -->|remember / remind| H[🧠 memory-supervisor skill]
-    H -->|store| I[memory-store skill\nstore_memory.py]
-    H -->|delete| J[memory-delete skill\ndelete_memory.py]
+    B -->|ryo-stats| C[commands only\n!setcredits · !refresh · !addwebhook]
+    B -->|ryo-travel| D[travel CEO\ntravel_prompt.txt]
+    B -->|general or other| E[general CEO\nceo_prompt.txt]
 
-    I --> K[(memory/ryo.db\nSQLite)]
-    J --> K
-    G -->|weather| L[curl OpenWeatherMap API]
+    D -->|off-topic| E
+    D -->|!travel-preferences reply| F[travel_preferences_save prompt\n→ memory-supervisor skill]
 
-    E --> M[Response text]
-    M --> N[sanitize + chunk\nDiscord-safe formatting]
-    N --> O([Discord reply])
+    E --> G{claude-agent-sdk\nclaude-sonnet-4-6}
+    G -->|news| H[news-agent skill]
+    G -->|search / weather| I[search-agent skill]
+    G -->|remember / remind / forget| J[memory-supervisor skill]
+    J --> K[(ryo.db · SQLite)]
+
+    G --> L[Response]
+    L --> M[sanitize + chunk]
+    M --> N([Discord reply])
 ```
 
 ### Proactive Reminder Loop
@@ -80,9 +120,7 @@ flowchart LR
     R -->|once| S[send DM → delete row]
     R -->|N times| U[send DM → decrement\nreschedule window]
     R -->|infinite| V[send DM → reschedule\nuntil user says stop]
-    S --> W([DM or channel ping])
-    U --> W
-    V --> W
+    S & U & V --> W([DM or channel ping])
 ```
 
 ### Memory Model
@@ -93,7 +131,7 @@ erDiagram
         TEXT discord_id PK
         TEXT username
         TEXT display_name
-        TEXT date_registered
+        TEXT registered_at
     }
     permanent_memories {
         INTEGER id PK
@@ -113,32 +151,45 @@ erDiagram
         INTEGER snooze_interval_mins
         TEXT date_logged
     }
+    cost_tracking {
+        INTEGER id PK
+        REAL total_cost_usd
+        REAL credit_balance_usd
+        INTEGER total_messages
+        INTEGER low_credit_alerted
+    }
+    webhooks {
+        INTEGER id PK
+        TEXT event
+        TEXT url
+        TEXT label
+    }
     users ||--o{ permanent_memories : has
     users ||--o{ reminders : has
 ```
 
 ---
 
-## 🧩 Skill Layout
+## Skills
 
-RYO is built on the **Claude Agent SDK** with filesystem-based Agent Skills — each skill is a directory that Claude loads on-demand, keeping context lean and responses fast.
+Built on the **Claude Agent SDK** with filesystem-based skills loaded on-demand.
 
 ```
 .claude/skills/
-├── news-agent/SKILL.md          ← headlines + links, 5-7 items
-├── search-agent/SKILL.md        ← web facts + weather card
-├── memory-supervisor/SKILL.md   ← routes store vs delete, asks repeat preference
+├── news-agent/SKILL.md
+├── search-agent/SKILL.md
+├── memory-supervisor/SKILL.md
 ├── memory-store/
 │   ├── SKILL.md
-│   └── scripts/store_memory.py  ← SQLite INSERT with repeat/snooze support
+│   └── scripts/store_memory.py
 └── memory-delete/
     ├── SKILL.md
-    └── scripts/delete_memory.py ← SQLite DELETE scoped to discord_id
+    └── scripts/delete_memory.py
 ```
 
 ---
 
-## ⚙️ Setup
+## Setup
 
 ### 1. Environment
 
@@ -150,9 +201,10 @@ pip install -r requirements.txt
 ### 2. `.env`
 
 ```
-ANTHROPIC_API_KEY=""        # console.anthropic.com (or leave blank if using Claude Code auth)
-OPENWEATHERMAP_API_KEY=""   # openweathermap.org
-DISCORD_TOKEN=""            # discord.com/developers
+ANTHROPIC_API_KEY=""       # console.anthropic.com
+OPENWEATHERMAP_API_KEY=""  # openweathermap.org
+DISCORD_TOKEN=""           # discord.com/developers
+OWNER_DISCORD_ID=""        # your Discord user ID
 ```
 
 ### 3. Database
@@ -161,7 +213,7 @@ DISCORD_TOKEN=""            # discord.com/developers
 python memory/setup_db.py
 ```
 
-Safe to re-run — creates tables if missing and migrates any existing CSV data.
+Safe to re-run — creates tables if missing, migrates existing CSV data.
 
 ### 4. Run
 
@@ -169,73 +221,33 @@ Safe to re-run — creates tables if missing and migrates any existing CSV data.
 python main.py
 ```
 
+RYO auto-creates `#ryo-stats`, `#ryo-travel`, and `#general` channels on first start if they don't exist.
+
 ---
 
-## ☁️ Oracle Cloud Deployment
+## Oracle Cloud Deployment
 
-RYO runs 24/7 on Oracle Cloud (Ubuntu, `pilot` branch). Deploy scripts live in `deploy/`:
+RYO runs 24/7 on Oracle Cloud (Ubuntu). Deploy scripts in `deploy/`:
 
 ```
 deploy/
-├── setup.sh                 ← one-shot server provisioning script
+├── setup.sh                 ← one-shot provisioning
 ├── ryo.service              ← systemd unit (auto-start on reboot)
-└── requirements-server.txt  ← minimal server dependencies
+└── requirements-server.txt
 ```
 
-**Provision a fresh instance:**
+**Fresh instance:**
 ```bash
 bash deploy/setup.sh
 ```
 
-**Manage the service:**
+**Push an update:**
 ```bash
-sudo systemctl status ryo      # check status
-sudo journalctl -u ryo -f      # live logs
-sudo systemctl restart ryo     # restart after a git pull
-```
-
-**Deploy an update:**
-```bash
-# local
 git push
-
-# on server
-cd /home/ubuntu/Ryo && git pull && sudo systemctl restart ryo
+ssh ubuntu@<ip> "cd /home/ubuntu/Ryo && git pull && sudo systemctl restart ryo"
 ```
 
----
-
-## 📊 Cost Diagnostics
-
-Create a `#ryo-stats` channel in your Discord server. RYO posts a live embed there that updates after every message showing:
-
-- **Last message** — cost in USD, latency, input/output tokens, cache hits
-- **Session totals** — cumulative cost, message count, total tokens
-
-No commands needed — the panel updates automatically.
-
----
-
-## ✅ Status
-
-### Shipped
-- ✅ Claude Agent SDK integration (`claude-sonnet-4-6`)
-- ✅ Agent Skills for news, search, and memory
-- ✅ Per-user memory with Discord ID scoping
-- ✅ SQLite memory database with migration from CSV
-- ✅ Proactive reminder pinging with repeat / snooze support
-- ✅ Discord-optimized response formatting
-- ✅ Auto user registration on first message
-- ✅ Oracle Cloud deployment (systemd, 24/7 uptime)
-- ✅ Live cost diagnostics panel (`#ryo-stats` embed)
-
-### Roadmap
-- ⏳ Goal tracking (fitness, career, personal)
-- ⏳ Meal prep and food inventory management
-- ⏳ Gym routine tracking
-- ⏳ Proactive daily briefings
-- ⏳ Full beta release
-
----
-
-> *Let RYO manage the noise so you can focus on what matters — and flow through life organized, informed, and stress-free.* 🌀
+**Logs:**
+```bash
+sudo journalctl -u ryo -f
+```
