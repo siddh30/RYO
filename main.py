@@ -26,7 +26,7 @@ intents.message_content = True
 _totals: dict = {}
 _last_cost: dict = {}
 _session_messages: int = 0
-_stats_messages: dict[int, discord.Message] = {}  # guild_id -> live embed message
+_stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [status, credits, last_msg, alltime]
 
 
 def _sanitize(text: str) -> str:
@@ -53,66 +53,82 @@ def _chunk(text: str) -> list[str]:
     return chunks or [""]
 
 
-def _build_stats_embed() -> discord.Embed:
-    embed = discord.Embed(title="📊 RYO Cost Diagnostics", color=0x5865F2)
+def _bar(ratio: float, width: int = 18) -> str:
+    filled = max(0, min(width, round(ratio * width)))
+    return "█" * filled + "░" * (width - filled)
 
-    if _last_cost:
-        embed.add_field(
-            name="Last Message",
-            value=(
-                f"💰 `${_last_cost['total_cost_usd']:.5f}`\n"
-                f"⏱️ `{_last_cost['duration_ms']} ms` · `{_last_cost['num_turns']}` turn(s)\n"
-                f"📥 `{_last_cost['input_tokens']:,}` in · `{_last_cost['output_tokens']:,}` out\n"
-                f"⚡ Cache read `{_last_cost['cache_read_tokens']:,}` · created `{_last_cost['cache_creation_tokens']:,}`"
-            ),
+
+def _embed_status() -> discord.Embed:
+    e = discord.Embed(title="🌀  RYO  —  Work in Balance. Life in Flow.", color=0x57F287)
+    e.add_field(name="Status", value="🟢  Online", inline=True)
+    e.add_field(name="Session messages", value=f"`{_session_messages}`", inline=True)
+    e.add_field(name="Model", value="`claude-sonnet-4-6`", inline=True)
+    e.set_footer(text="Updates after every message")
+    e.timestamp = datetime.now()
+    return e
+
+
+def _embed_credits() -> discord.Embed:
+    balance = _totals.get("credit_balance_usd")
+    spent = _totals.get("total_cost_usd", 0.0)
+
+    if balance is not None:
+        remaining = max(0.0, balance - spent)
+        ratio = remaining / balance if balance > 0 else 0.0
+        pct = ratio * 100
+        color = 0x57F287 if pct > 30 else (0xFEE75C if pct > 10 else 0xED4245)
+        e = discord.Embed(title="💳  Credit Balance", color=color)
+        e.add_field(
+            name="Remaining",
+            value=f"**`${remaining:.2f}`**  /  `${balance:.2f}`",
             inline=False,
         )
-
-    all_time_cost = _totals.get("total_cost_usd", 0.0)
-    all_time_messages = _totals.get("total_messages", 0)
-    all_time_in = _totals.get("total_input_tokens", 0)
-    all_time_out = _totals.get("total_output_tokens", 0)
-    all_time_cache = _totals.get("total_cache_read_tokens", 0)
-
-    embed.add_field(
-        name=f"All-Time Total  ·  {_session_messages} this session",
-        value=(
-            f"💬 `{all_time_messages}` messages\n"
-            f"💰 `${all_time_cost:.5f}` spent\n"
-            f"📥 `{all_time_in:,}` in · `{all_time_out:,}` out\n"
-            f"⚡ Cache read `{all_time_cache:,}`"
-        ),
-        inline=False,
-    )
-
-    credit_balance = _totals.get("credit_balance_usd")
-    if credit_balance is not None:
-        remaining = credit_balance - all_time_cost
-        bar_total = 20
-        filled = max(0, min(bar_total, round((remaining / credit_balance) * bar_total))) if credit_balance > 0 else 0
-        bar = "█" * filled + "░" * (bar_total - filled)
-        pct = max(0.0, (remaining / credit_balance) * 100) if credit_balance > 0 else 0.0
-        embed.add_field(
-            name="💳 Credits",
-            value=(
-                f"`{bar}` {pct:.1f}%\n"
-                f"Started `${credit_balance:.2f}` · Spent `${all_time_cost:.5f}`\n"
-                f"**Estimated remaining: `${remaining:.2f}`**\n"
-                f"[Check billing]({BILLING_URL})"
-            ),
+        e.add_field(
+            name=f"{_bar(ratio)}  {pct:.1f}%",
+            value=f"Spent `${spent:.4f}`",
             inline=False,
         )
+        e.add_field(name="Top up", value=f"[platform.claude.com]({BILLING_URL})", inline=True)
+        e.add_field(name="Update balance", value="`!setcredits <amount>`", inline=True)
     else:
-        embed.add_field(
-            name="💳 Credits",
-            value=f"Set a balance with `!setcredits <amount>`\n[Check billing]({BILLING_URL})",
-            inline=False,
-        )
+        e = discord.Embed(title="💳  Credit Balance", color=0x99AAB5)
+        e.description = f"No balance set.\nUse `!setcredits 28.35` to set it.\n[Check billing]({BILLING_URL})"
 
-    last_updated = _totals.get("last_updated", "—")
-    embed.set_footer(text=f"Last updated {last_updated} UTC · use !setcredits to update balance")
-    embed.timestamp = datetime.now()
-    return embed
+    e.timestamp = datetime.now()
+    return e
+
+
+def _embed_last_message() -> discord.Embed:
+    e = discord.Embed(title="⚡  Last Message", color=0x5865F2)
+    if _last_cost:
+        e.add_field(name="Cost", value=f"`${_last_cost['total_cost_usd']:.5f}`", inline=True)
+        e.add_field(name="Latency", value=f"`{_last_cost['duration_ms']} ms`", inline=True)
+        e.add_field(name="Turns", value=f"`{_last_cost['num_turns']}`", inline=True)
+        e.add_field(name="Input tokens", value=f"`{_last_cost['input_tokens']:,}`", inline=True)
+        e.add_field(name="Output tokens", value=f"`{_last_cost['output_tokens']:,}`", inline=True)
+        e.add_field(name="Cache read", value=f"`{_last_cost['cache_read_tokens']:,}`", inline=True)
+    else:
+        e.description = "*No messages yet this session.*"
+    e.timestamp = datetime.now()
+    return e
+
+
+def _embed_alltime() -> discord.Embed:
+    e = discord.Embed(title="📊  All-Time Usage", color=0xEB459E)
+    e.add_field(name="Messages", value=f"`{_totals.get('total_messages', 0):,}`", inline=True)
+    e.add_field(name="Total cost", value=f"`${_totals.get('total_cost_usd', 0.0):.4f}`", inline=True)
+    e.add_field(name="​", value="​", inline=True)
+    e.add_field(name="Input tokens", value=f"`{_totals.get('total_input_tokens', 0):,}`", inline=True)
+    e.add_field(name="Output tokens", value=f"`{_totals.get('total_output_tokens', 0):,}`", inline=True)
+    e.add_field(name="Cache read", value=f"`{_totals.get('total_cache_read_tokens', 0):,}`", inline=True)
+    last = _totals.get("last_updated", "—")
+    e.set_footer(text=f"Last updated {last} UTC")
+    e.timestamp = datetime.now()
+    return e
+
+
+def _all_embeds() -> list[discord.Embed]:
+    return [_embed_status(), _embed_credits(), _embed_last_message(), _embed_alltime()]
 
 
 def _due_reminders() -> list[dict]:
@@ -169,34 +185,44 @@ class Client(discord.Client):
                 try:
                     channel = await guild.create_text_channel(
                         "ryo-stats",
-                        topic="Live RYO cost diagnostics — auto-updated after every message.",
+                        topic="Live RYO dashboard — updates after every message.",
                     )
                     print(f"Created #ryo-stats in {guild.name}")
                 except discord.Forbidden:
                     print(f"Missing permission to create #ryo-stats in {guild.name}")
                     continue
-            async for msg in channel.history(limit=20):
+
+            # Collect existing bot embed messages in order
+            existing = []
+            async for msg in channel.history(limit=10, oldest_first=True):
                 if msg.author == self.user and msg.embeds:
-                    _stats_messages[guild.id] = msg
-                    await msg.edit(embed=_build_stats_embed())
-                    break
+                    existing.append(msg)
+
+            embeds = _all_embeds()
+
+            if len(existing) == len(embeds):
+                # Reuse and refresh all panels
+                for msg, emb in zip(existing, embeds):
+                    await msg.edit(embed=emb)
+                _stats_messages[guild.id] = existing
             else:
-                msg = await channel.send(embed=_build_stats_embed())
-                _stats_messages[guild.id] = msg
+                # Clear and repost clean dashboard
+                await channel.purge(limit=20, check=lambda m: m.author == self.user)
+                msgs = [await channel.send(embed=emb) for emb in embeds]
+                _stats_messages[guild.id] = msgs
 
     async def _update_stats_panel(self, guild: discord.Guild):
         if guild.id not in _stats_messages:
-            channel = discord.utils.get(guild.text_channels, name="ryo-stats")
-            if not channel:
-                return
-            msg = await channel.send(embed=_build_stats_embed())
-            _stats_messages[guild.id] = msg
+            await self._init_stats_panels()
             return
-        try:
-            await _stats_messages[guild.id].edit(embed=_build_stats_embed())
-        except discord.NotFound:
-            _stats_messages.pop(guild.id, None)
-            await self._update_stats_panel(guild)
+        embeds = _all_embeds()
+        for msg, emb in zip(_stats_messages[guild.id], embeds):
+            try:
+                await msg.edit(embed=emb)
+            except discord.NotFound:
+                _stats_messages.pop(guild.id, None)
+                await self._init_stats_panels()
+                return
 
     @tasks.loop(minutes=1)
     async def reminder_loop(self):
