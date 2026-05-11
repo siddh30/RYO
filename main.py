@@ -121,14 +121,15 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
     if channel_name == "ryo-travel":
         e = discord.Embed(
             title="✈️  Travel Planner",
-            description="Plan trips, build itineraries, and explore the world.",
+            description="Plan trips, build itineraries, find the best deals, and maximise your credit card benefits.",
             color=0x1DA1F2,
         )
         e.add_field(
             name="💬 Just ask",
             value=(
                 "*\"Plan a 5-day trip to Kyoto\"*\n"
-                "*\"What should I pack for Bali in July?\"*\n"
+                "*\"Cheapest flights from London to NYC in June?\"*\n"
+                "*\"Which card gives me the best benefits for this trip?\"*\n"
                 "*\"Best restaurants in Paris under €30?\"*"
             ),
             inline=False,
@@ -138,9 +139,10 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
             value=(
                 "`!travel-preferences` — view your travel profile\n"
                 "`!travel-preferences update` — update saved preferences\n"
-                "`!plan-trip <destination> <start date> <end date>`\n"
-                "    ↳ full itinerary + Discord events + pre-trip reminders\n"
-                "`!clear-events` — delete all scheduled events in the server\n"
+                "`!plan-trip <destination> <start> to <end> [description]`\n"
+                "    ↳ itinerary · deals & card benefits · Discord events · reminders\n"
+                "    ↳ e.g. `!plan-trip Tokyo June 1 to June 7 staying at Park Hyatt`\n"
+                "🔒 `!clear-events` — delete all scheduled events\n"
                 "🔒 `!clear` — clear all messages"
             ),
             inline=False,
@@ -148,13 +150,14 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
         e.add_field(
             name="💡 Tips",
             value=(
+                "💳 Tell Ryo your credit cards once — *\"I have Amex Platinum\"* — and every trip plan will surface your benefits automatically\n"
                 "📸 Attach an image or PDF and ask a question — Ryo can analyse it\n"
                 "↩️ Off-topic messages are automatically answered in **#ryo-general**\n"
                 "-# 🔒 = owner only"
             ),
             inline=False,
         )
-        e.set_footer(text="Both travellers should run !travel-preferences before planning a trip together")
+        e.set_footer(text="Run !travel-preferences before your first trip so Ryo knows your style")
         return e
 
     # ryo-general and any other channel
@@ -171,16 +174,16 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
             "🔍 *\"Look up X\"* / *\"Find info on Y\"*\n"
             "🧠 *\"Remember I'm a VP at JPMorgan\"*\n"
             "🗑️ *\"Forget my address\"*\n"
-            "⏰ *\"Remind me at 3pm\"* / *\"Remind me 3 times every 10 min\"*"
+            "⏰ *\"Remind me at 3pm\"* / *\"Remind me 3 times every 10 min\"*\n"
+            "📸 *Attach an image or PDF and ask a question*"
         ),
         inline=False,
     )
     e.add_field(
         name="⌨️ Commands",
         value=(
-            "📸 Attach an image or PDF — Ryo can analyse it\n"
             "🔒 `!clear` — clear all messages\n"
-            "-# 🔒 = owner only"
+            "-# 🔒 = owner only · Conversation history persists across restarts"
         ),
         inline=False,
     )
