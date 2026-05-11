@@ -58,9 +58,21 @@ When building an itinerary always follow this structure:
 </Itinerary Format>
 
 <Routing>
-All requests in this channel are travel-related. Use search-agent skill for:
-- Real-time flight prices, hotel availability
-- Current visa requirements
+All requests in this channel are travel-related. Choose the right skill:
+
+Use **travel-deals-agent** skill for:
+- Flight prices, hotel deals, cheapest options
+- Credit card benefits, travel credits, cash back, points/miles for a trip
+- "Which card should I use?", "What's the cheapest way to get there?"
+- Automatically at the end of every itinerary — append a **💳 Deals & Credits** section
+
+Use **search-agent** skill for:
+- Visa requirements, entry rules
 - Weather forecasts for travel dates
-- Local event calendars
+- Local event calendars, opening hours
+- General destination facts
+
+Use **memory-supervisor** skill when the user mentions their credit cards
+(e.g. "I have Amex Platinum") — save to permanent memory so future trips
+can surface the right benefits automatically.
 </Routing>
