@@ -680,6 +680,7 @@ class Client(discord.Client):
                 discord_id=discord_id,
                 display_name=display_name,
                 channel_type="travel",
+                conversation_history=_conversation_history.get(message.channel.id, []),
             )
 
         await status_msg.delete()
