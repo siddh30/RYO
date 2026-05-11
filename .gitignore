@@ -1,3 +1,23 @@
+# Secrets
 .env
-*outputs/
+*.key
+*.pem
+
+# Claude Code local config (personal settings, not project config)
+.claude/settings.local.json
+.claude/projects/
+
+# Session / deploy notes with server details
+SESSION.md
+
+# Runtime state
+memory/ryo.db
+
+# Python
+*__pycache__
+*.pyc
+*.pyo
+
+# Editor
 *.vscode/
+*outputs/

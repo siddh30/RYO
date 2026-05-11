@@ -1,0 +1,19 @@
+[Unit]
+Description=RYO Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Ryo
+EnvironmentFile=/home/ubuntu/Ryo/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/ubuntu/Ryo/venv/bin/python -u main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+claude-agent-sdk
+anthropic
+discord.py==2.5.2
+pandas
+python-dotenv
+requests
+aiohttp
