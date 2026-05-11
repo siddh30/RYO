@@ -21,6 +21,7 @@ cloudpickle==3.1.1
 comm @ file:///home/conda/feedstock_root/build_artifacts/comm_1733502965406/work
 cryptography==44.0.3
 curl_cffi==0.11.2
+claude-agent-sdk
 dataclasses-json==0.6.7
 debugpy @ file:///Users/runner/miniforge3/conda-bld/debugpy_1744321336370/work
 decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1740384970518/work
@@ -55,22 +56,6 @@ jsonschema-specifications==2025.4.1
 jsonschema_rs==0.29.1
 jupyter_client @ file:///home/conda/feedstock_root/build_artifacts/jupyter_client_1733440914442/work
 jupyter_core @ file:///home/conda/feedstock_root/build_artifacts/jupyter_core_1748260711414/work
-langchain==0.3.25
-langchain-anthropic==0.3.15
-langchain-community==0.3.24
-langchain-core==0.3.64
-langchain-openai==0.3.18
-langchain-tavily==0.2.1
-langchain-text-splitters==0.3.8
-langgraph==0.4.7
-langgraph-api==0.2.36
-langgraph-checkpoint==2.0.26
-langgraph-cli==0.2.10
-langgraph-prebuilt==0.2.1
-langgraph-runtime-inmem==0.2.0
-langgraph-sdk==0.1.70
-langmem==0.0.27
-langsmith==0.3.45
 MarkupSafe==3.0.2
 marshmallow==3.26.1
 matplotlib-inline @ file:///home/conda/feedstock_root/build_artifacts/matplotlib-inline_1733416936468/work
@@ -81,7 +66,6 @@ mypy_extensions==1.1.0
 narwhals==1.41.0
 nest_asyncio @ file:///home/conda/feedstock_root/build_artifacts/nest-asyncio_1733325553580/work
 numpy==2.2.6
-openai==1.82.1
 orjson==3.10.18
 ormsgpack==1.10.0
 packaging==24.2
@@ -128,7 +112,6 @@ starlette==0.47.0
 streamlit==1.45.1
 structlog==25.3.0
 tenacity==9.1.2
-tiktoken==0.9.0
 toml==0.10.2
 tornado @ file:///Users/runner/miniforge3/conda-bld/tornado_1748003354091/work
 tqdm==4.67.1

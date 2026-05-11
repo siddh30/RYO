@@ -1,60 +1,32 @@
 import sys
 sys.path.append('../')
-import pandas as pd
-from langgraph_supervisor import create_supervisor
-from langgraph.checkpoint.memory import InMemorySaver
-from langchain_core.prompts import PromptTemplate
-from langgraph_supervisor.handoff import create_forward_message_tool
 
-######### Import Agents #########
-from agents.news_agent import news_agent
-from agents.search_agent import search_agent
-from agents.central_memory_supervisor import cms
+from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage
 
-###### From config #######
-from config import Config
-conf = Config()
-
-
-######## Resource Manager ########
 from utils.resource_manager import ResourceManager
-resource_manager = ResourceManager.get_instance()
 
 
+async def run_ceo(user_message: str, discord_id: str, display_name: str) -> str:
+    rm = ResourceManager.get_instance()
+    base_prompt = rm.prompt_loader("ceo_prompt")
 
-prompt_blueprint = resource_manager.prompt_loader("ceo_prompt")
+    user_context = (
+        f"\n<CurrentUser>\n"
+        f"DisplayName: {display_name}\n"
+        f"DiscordID: {discord_id}\n"
+        f"</CurrentUser>"
+    )
 
+    async for message in query(
+        prompt=user_message,
+        options=ClaudeAgentOptions(
+            system_prompt=base_prompt + user_context,
+            model="claude-sonnet-4-6",
+            allowed_tools=["Read", "Write", "Edit", "Bash", "WebSearch", "WebFetch"],
+            permission_mode="dontAsk",
+        ),
+    ):
+        if isinstance(message, ResultMessage):
+            return message.result or ""
 
-
-try:
-    long_term_memory = pd.read_csv(f"{conf.memory_path}/Permanent_Memory.csv")
-    long_term_memory_str = long_term_memory.to_json(orient='records', indent=4)
-
-except:
-    long_term_memory_str = ""
-
-
-try:
-    reminders = pd.read_csv(f"{conf.memory_path}/Reminders.csv")
-    reminders_str = reminders.to_json(orient='records', indent=4)
-
-except:
-    reminders_str = ""
-
-
-prompt_template = PromptTemplate.from_template(prompt_blueprint)
-prompt = prompt_template.invoke({"ToolMessage": '{"tool":"forwarded_response","args":{"from_agent":"news_agent"}}',
-                            "long_term_memory_string": long_term_memory_str,
-                            "reminder_string": reminders_str}).to_string()
-
-
-forwarding_tool = create_forward_message_tool("forwarded_response")
-
-graph = create_supervisor([news_agent, cms, search_agent], 
-                        model=conf.model, 
-                        supervisor_name='Ryo',
-                        prompt=prompt,
-                        tools=[forwarding_tool],
-                        output_mode='last_message')
-
-ryo = graph.compile(checkpointer=InMemorySaver())
+    return ""
