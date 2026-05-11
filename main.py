@@ -11,6 +11,7 @@ conf = Config()
 from agents.ceo import run_ceo
 from memory.register_user import register_user
 from memory import cost_db
+from utils.webhook_dispatch import dispatch, add_webhook, remove_webhook, list_webhooks
 
 import discord
 from discord.ext import tasks
@@ -274,11 +275,53 @@ class Client(discord.Client):
                 else:
                     _reschedule_reminder(reminder["id"], snooze_interval, repeat_count - 1)
                 print(f"Pinged {discord_id}: {index_title} (repeat_count={repeat_count})")
+                await dispatch("reminder", {
+                    "discord_id": discord_id,
+                    "index_title": index_title,
+                    "context": context,
+                    "repeat_count": repeat_count,
+                })
 
     async def on_message(self, message):
         global _totals, _last_cost, _session_messages
 
         if message.author == self.user:
+            return
+
+        # webhook commands — owner only
+        if message.content.strip().startswith("!addwebhook"):
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can manage webhooks.")
+                return
+            parts = message.content.strip().split()
+            if len(parts) >= 3:
+                label = " ".join(parts[3:]) if len(parts) > 3 else ""
+                await message.channel.send(add_webhook(parts[1], parts[2], label))
+            else:
+                await message.channel.send("Usage: `!addwebhook <event> <url> [label]`\nEvents: `reminder`, `low_credit`, `new_user`, `message`")
+            return
+
+        if message.content.strip().startswith("!removewebhook"):
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can manage webhooks.")
+                return
+            parts = message.content.strip().split()
+            if len(parts) == 2:
+                await message.channel.send(remove_webhook(parts[1]))
+            else:
+                await message.channel.send("Usage: `!removewebhook <event>`")
+            return
+
+        if message.content.strip() == "!listwebhooks":
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can manage webhooks.")
+                return
+            rows = list_webhooks()
+            if not rows:
+                await message.channel.send("No webhooks configured. Use `!addwebhook <event> <url>`")
+            else:
+                lines = "\n".join(f"• `{r['event']}` — {r['url']}" + (f" _{r['label']}_" if r['label'] else "") for r in rows)
+                await message.channel.send(f"**Configured webhooks:**\n{lines}")
             return
 
         # !setcredits command — owner only
@@ -307,6 +350,7 @@ class Client(discord.Client):
         is_new = register_user(discord_id, username, display_name)
         if is_new:
             print(f"New user registered: {display_name} ({discord_id})")
+            await dispatch("new_user", {"discord_id": discord_id, "display_name": display_name})
 
         async with message.channel.typing():
             response, cost_info = await run_ceo(
@@ -321,6 +365,14 @@ class Client(discord.Client):
             cost_db.save(cost_info)
             _totals = cost_db.load()
             await self._check_low_credit()
+            await dispatch("message", {
+                "discord_id": discord_id,
+                "display_name": display_name,
+                "cost_usd": cost_info["total_cost_usd"],
+                "input_tokens": cost_info["input_tokens"],
+                "output_tokens": cost_info["output_tokens"],
+                "duration_ms": cost_info["duration_ms"],
+            })
 
         for chunk in _chunk(_sanitize(response)):
             await message.channel.send(chunk)
@@ -343,6 +395,7 @@ class Client(discord.Client):
                 )
                 cost_db.mark_low_credit_alerted()
                 _totals["low_credit_alerted"] = 1
+                await dispatch("low_credit", {"remaining_usd": remaining, "balance_usd": balance})
             except Exception as e:
                 print(f"Low credit alert failed: {e}")
 
