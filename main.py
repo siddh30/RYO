@@ -33,6 +33,7 @@ _totals: dict = {}
 _last_cost: dict = {}
 _session_messages: int = 0
 _stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [status, credits, last_msg, alltime]
+_channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persistent actions embed
 _pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire reply
 
 
@@ -106,6 +107,66 @@ def _embed_credits_dashboard() -> discord.Embed:
 
 def _all_embeds() -> list[discord.Embed]:
     return [_embed_credits_dashboard()]
+
+
+def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
+    """Return a persistent actions embed for a given channel, or None for ryo-stats (handled separately)."""
+    if channel_name == "ryo-stats":
+        return None
+
+    if channel_name == "ryo-travel":
+        e = discord.Embed(
+            title="✈️  Travel Channel — Available Actions",
+            color=0x1DA1F2,
+        )
+        e.add_field(
+            name="Commands",
+            value=(
+                "`!travel-preferences` — view your travel profile\n"
+                "`!travel-preferences update` — update preferences\n"
+                "`!plan-trip <destination> <YYYY-MM-DD> <YYYY-MM-DD>` — full itinerary + Discord events + reminders\n"
+                "`!clear` — clear all messages in this channel"
+            ),
+            inline=False,
+        )
+        e.add_field(
+            name="Tips",
+            value=(
+                "📸 Attach an image or PDF and ask a question — Ryo can analyse it\n"
+                "Off-topic messages are automatically answered in **#ryo-general**"
+            ),
+            inline=False,
+        )
+        e.set_footer(text="Both you and your travel partner should run !travel-preferences before planning a trip")
+        return e
+
+    # ryo-general and any other channel
+    e = discord.Embed(
+        title="🌀  RYO — Available Actions",
+        color=0x57F287,
+    )
+    e.add_field(
+        name="Just talk naturally",
+        value=(
+            "📰 News — *\"What's in the news?\"*\n"
+            "🌤️ Weather — *\"Weather in Tokyo?\"*\n"
+            "🔍 Search — *\"Look up X\"*\n"
+            "🧠 Remember — *\"Remember that I'm a VP at JPMorgan\"*\n"
+            "🗑️ Forget — *\"Forget my address\"*\n"
+            "⏰ Remind — *\"Remind me at 3pm\"* / *\"Remind me 3 times every 10 min\"*"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="Commands",
+        value=(
+            "`!clear` — clear all messages in this channel\n"
+            "📸 Attach an image or PDF — Ryo can analyse it"
+        ),
+        inline=False,
+    )
+    e.set_footer(text="Owner-only: !setcredits · !addwebhook · !listwebhooks · !removewebhook (use in #ryo-stats)")
+    return e
 
 
 TRAVEL_PREF_QUESTIONNAIRE = """✈️ Let's set up your travel profile! Reply with your answers:
@@ -184,9 +245,37 @@ class Client(discord.Client):
         _totals = cost_db.load()
         print(f"Logged on as {self.user}!")
         self.reminder_loop.start()
-        await self._init_stats_panels()
         await self._ensure_channel("ryo-travel", "✈️ Travel itineraries and trip planning with RYO.")
         await self._ensure_channel("ryo-general", "💬 General chat with RYO — news, weather, reminders, memory.")
+        await self._init_stats_panels()
+        await self._init_channel_dashboards()
+
+    async def _init_channel_dashboards(self):
+        """Post or refresh the persistent actions embed in every active channel."""
+        active_names = {"ryo-general", "ryo-travel"}
+        for guild in self.guilds:
+            for channel in guild.text_channels:
+                if channel.name not in active_names:
+                    continue
+                await self._restore_channel_dashboard(channel)
+
+    async def _restore_channel_dashboard(self, channel: discord.TextChannel):
+        """Find existing dashboard embed or post a fresh one at the bottom."""
+        embed = _channel_dashboard_embed(channel.name)
+        if embed is None:
+            return
+        # Look for an existing dashboard message from the bot
+        existing = None
+        async for msg in channel.history(limit=30, oldest_first=False):
+            if msg.author == self.user and msg.embeds and msg.embeds[0].title and "Available Actions" in msg.embeds[0].title:
+                existing = msg
+                break
+        if existing:
+            await existing.edit(embed=embed)
+            _channel_dashboards[channel.id] = existing
+        else:
+            msg = await channel.send(embed=embed)
+            _channel_dashboards[channel.id] = msg
 
     async def _ensure_channel(self, name: str, topic: str):
         for guild in self.guilds:
@@ -381,9 +470,12 @@ class Client(discord.Client):
                 f"-# For messages older than 14 days use **Undiscord** — github.com/victornpb/undiscord"
             )
             await confirm.delete(delay=8)
-            # Restore stats dashboard if this is ryo-stats
+            # Restore persistent dashboards after clearing
             if channel_name == "ryo-stats" and message.guild:
                 await self._init_stats_panels()
+            elif isinstance(message.channel, discord.TextChannel):
+                _channel_dashboards.pop(message.channel.id, None)
+                await self._restore_channel_dashboard(message.channel)
             return
 
         # ryo-stats: only cost/webhook commands allowed
