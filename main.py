@@ -368,6 +368,9 @@ class Client(discord.Client):
             if str(message.author.id) != conf.owner_discord_id:
                 await message.channel.send("🚫 Only the bot owner can clear conversations.")
                 return
+            if not isinstance(message.channel, discord.TextChannel):
+                await message.channel.send("⚠️ `!clear-conversation` only works in server channels.")
+                return
             try:
                 await message.delete()
             except discord.Forbidden:
