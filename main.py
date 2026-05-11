@@ -236,6 +236,43 @@ async def _compress_history(channel_id: int) -> str:
     return summary
 
 
+def _parse_trip_args(text: str) -> tuple[str, datetime | None, datetime | None]:
+    """
+    Parse 'New Orleans 19th May to 24th May' → ('New Orleans', datetime, datetime).
+    Handles multi-word destinations, natural language dates, and 'to/through/until' separators.
+    """
+    # Split on date-range separator
+    halves = re.split(r'\s+(?:to|through|until|[-–→])\s+', text, maxsplit=1, flags=re.IGNORECASE)
+
+    try:
+        if len(halves) == 2:
+            first, second = halves
+            # fuzzy_with_tokens extracts the date and returns non-date tokens as destination
+            start_dt, tokens = dateparser.parse(first, fuzzy_with_tokens=True, dayfirst=False)
+            destination = ' '.join(t.strip(',- ') for t in tokens if t.strip(',- '))
+
+            # Parse end date; if no year given, inherit from start_dt
+            try:
+                end_dt = dateparser.parse(second, dayfirst=False, default=start_dt)
+            except Exception:
+                end_dt = dateparser.parse(second, fuzzy=True, default=start_dt)
+
+            return destination.strip(), start_dt, end_dt
+
+        # Fallback: original space-split for 'Destination YYYY-MM-DD YYYY-MM-DD'
+        parts = text.split()
+        if len(parts) >= 3:
+            destination = parts[0]
+            start_dt = dateparser.parse(parts[1], dayfirst=False)
+            end_dt   = dateparser.parse(parts[2], dayfirst=False)
+            return destination, start_dt, end_dt
+
+    except Exception:
+        pass
+
+    return "", None, None
+
+
 def _get_travel_preferences(discord_id: str) -> str | None:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -608,20 +645,15 @@ class Client(discord.Client):
         return None
 
     async def _handle_plan_trip(self, message: discord.Message, discord_id: str, display_name: str):
-        parts = message.content.strip().split()
-        if len(parts) < 4:
-            await message.channel.send(
-                "Usage: `!plan-trip <destination> <start date> <end date>`\n"
-                "Example: `!plan-trip Tokyo June-1-2026 June-7-2026`"
-            )
-            return
+        raw = re.sub(r'^!plan-trip\s+', '', message.content.strip(), flags=re.IGNORECASE)
+        destination, start_date, end_date = _parse_trip_args(raw)
 
-        destination = parts[1]
-        try:
-            start_date = dateparser.parse(parts[2], dayfirst=False)
-            end_date = dateparser.parse(parts[3], dayfirst=False)
-        except Exception:
-            await message.channel.send("Couldn't parse those dates. Try: `June 1 2026`, `2026-06-01`, or `01/06/2026`.")
+        if not destination or not start_date or not end_date:
+            await message.channel.send(
+                "Couldn't figure out the destination or dates. Try:\n"
+                "`!plan-trip New Orleans 19th May to 24th May`\n"
+                "`!plan-trip Tokyo June 1 2026 to June 7 2026`"
+            )
             return
 
         days = (end_date - start_date).days + 1
