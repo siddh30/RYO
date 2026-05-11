@@ -65,7 +65,8 @@ STATS_COMMANDS = (
     "`!setcredits <amount>` — update your credit balance\n"
     "`!addwebhook <event> <url>` — register an outbound webhook\n"
     "`!listwebhooks` — list all configured webhooks\n"
-    "`!removewebhook <event>` — remove a webhook"
+    "`!removewebhook <event>` — remove a webhook\n"
+    "`!clear-conversation` — delete all Ryo messages in a channel"
 )
 
 
@@ -353,6 +354,19 @@ class Client(discord.Client):
                     return
 
         channel_name = getattr(message.channel, "name", "")
+
+        # !clear-conversation — works in every channel
+        if message.content.strip() == "!clear-conversation":
+            try:
+                await message.delete()
+            except discord.Forbidden:
+                pass
+            deleted = await message.channel.purge(
+                limit=200, check=lambda m: m.author == self.user
+            )
+            confirm = await message.channel.send(f"🧹 Cleared **{len(deleted)}** message(s).")
+            await confirm.delete(delay=4)
+            return
 
         # ryo-stats: only cost/webhook commands allowed
         if channel_name == "ryo-stats":
