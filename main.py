@@ -567,8 +567,11 @@ class Client(discord.Client):
                 await self._update_stats_panel(message.guild)
             return
 
-        # !clear-events — ryo-travel only
+        # !clear-events — ryo-travel only, owner only
         if channel_name == "ryo-travel" and message.content.strip() == "!clear-events":
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can clear events.")
+                return
             if not message.guild:
                 return
             count = await delete_all_guild_events(message.guild)
