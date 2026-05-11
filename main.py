@@ -166,7 +166,15 @@ class Client(discord.Client):
         for guild in self.guilds:
             channel = discord.utils.get(guild.text_channels, name="ryo-stats")
             if not channel:
-                continue
+                try:
+                    channel = await guild.create_text_channel(
+                        "ryo-stats",
+                        topic="Live RYO cost diagnostics — auto-updated after every message.",
+                    )
+                    print(f"Created #ryo-stats in {guild.name}")
+                except discord.Forbidden:
+                    print(f"Missing permission to create #ryo-stats in {guild.name}")
+                    continue
             async for msg in channel.history(limit=20):
                 if msg.author == self.user and msg.embeds:
                     _stats_messages[guild.id] = msg
