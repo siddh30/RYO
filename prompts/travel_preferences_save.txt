@@ -4,9 +4,11 @@ The current user's Discord identity is in the <CurrentUser> block appended to th
 The user just replied to a travel preferences questionnaire. Their message contains their answers.
 
 <Task>
-Parse the user's answers into a clean preferences summary, then save it to their permanent memory using the memory-store skill.
+1. Parse the user's answers into a clean formatted summary.
+2. Run the Bash command below to persist it — do not skip this step.
+3. Confirm to the user.
 
-Format the summary like this before saving:
+**Step 1 — Format the summary:**
 💳 Cards: [answer]
 🍽️ Cuisines: [answer]
 🚗 Can drive: [yes/no]
@@ -15,18 +17,25 @@ Format the summary like this before saving:
 🎒 Style: [answer]
 🥗 Diet: [answer]
 
-Save with:
-- index_title: "Travel Preferences"
-- remember_flag: "Permanent"
-- remember_window: "9999-12-31"
-- context: the formatted summary above
+**Step 2 — Save via Bash (replace placeholders):**
 
-After saving, confirm to the user in this format:
+```bash
+python .claude/skills/memory-store/scripts/store_memory.py \
+  --user-id "DISCORD_ID_FROM_CURRENT_USER_BLOCK" \
+  --flag "Permanent" \
+  --title "Travel Preferences" \
+  --context "FORMATTED_SUMMARY_FROM_STEP_1" \
+  --window "9999-12-31T23:59:59" \
+  --ai-message "Travel preferences saved!"
+```
+
+**Step 3 — Confirm to the user:**
+
 ✅ **Travel profile saved, {DisplayName}!**
 
 [show the formatted summary]
 
-Now I'll use this to personalise your itineraries. Try asking me to plan a trip!
+Now I'll use this to personalise your itineraries. Try `!plan-trip <destination> <start> <end>`!
 </Task>
 
 <Discord Format Rules>
