@@ -21,7 +21,7 @@ from agents.trip_planner import (
     get_existing_event_names, delete_all_guild_events, event_title,
 )
 from memory.register_user import register_user
-from memory import cost_db
+from memory import cost_db, profile_db
 
 import discord
 from discord.ext import tasks
@@ -270,7 +270,15 @@ def _clear_channel_session(channel_id: int):
 
 
 def _get_user_memories(discord_id: str) -> str:
-    """Load permanent memories for a user. Includes legacy rows with NULL discord_id."""
+    """Return structured profile + raw permanent memories for context injection."""
+    parts: list[str] = []
+
+    # Structured profile first (fast key lookup, always up to date)
+    profile_text = profile_db.format_for_context(discord_id)
+    if profile_text:
+        parts.append("[Structured profile]\n" + profile_text)
+
+    # Raw permanent memories (legacy entries + anything not yet profiled)
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
         "SELECT DISTINCT context FROM permanent_memories "
@@ -278,51 +286,23 @@ def _get_user_memories(discord_id: str) -> str:
         (discord_id,),
     ).fetchall()
     conn.close()
-    return "\n".join(r[0] for r in rows if r[0])
+    raw = "\n".join(r[0] for r in rows if r[0])
+    if raw:
+        parts.append("[Memory entries]\n" + raw)
+
+    return "\n\n".join(parts)
 
 
 _preferred_name_cache: dict[str, str] = {}  # discord_id -> resolved preferred name
 
-# Broad pattern covering natural ways someone says what they want to be called:
-# "call me Sid", "refer me as Sid", "refer to me as Sid", "I'm known as Sid",
-# "I go by Sid", "goes by Sid", "my name is Sid", "my preferred name is Sid",
-# "my nickname is Sid", "you can call me Sid", "I am Sid", "I'm Sid"
-_PREFERRED_NAME_RE = re.compile(
-    r'(?:'
-    r'(?:you\s+can\s+)?(?:call|refer(?:\s+to)?)\s+me\s+(?:as\s+)?'
-    r'|go(?:es)?\s+by\s+'
-    r'|known\s+as\s+'
-    r'|my\s+(?:preferred\s+|nick)?name\s+is\s+'
-    r'|I\s+go\s+by\s+'
-    r'|I(?:\'m|\s+am)\s+(?:called\s+|known\s+as\s+)?'
-    r')([A-Z][a-z]{1,20})\b',
-    re.IGNORECASE,
-)
-
 
 def _get_preferred_name(discord_id: str, fallback: str) -> str:
-    """Return the user's preferred first name from permanent memory, or fallback.
-    Results are cached for the lifetime of the process."""
+    """Return preferred name from structured user_profile, caching per process lifetime."""
     if discord_id in _preferred_name_cache:
         return _preferred_name_cache[discord_id]
-
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT DISTINCT context FROM permanent_memories "
-        "WHERE discord_id = ? OR discord_id IS NULL",
-        (discord_id,),
-    ).fetchall()
-    conn.close()
-
-    for (context,) in rows:
-        m = _PREFERRED_NAME_RE.search(context)
-        if m:
-            name = m.group(1).capitalize()
-            _preferred_name_cache[discord_id] = name
-            return name
-
-    _preferred_name_cache[discord_id] = fallback
-    return fallback
+    name = profile_db.get_value(discord_id, "preferred_name") or fallback
+    _preferred_name_cache[discord_id] = name
+    return name
 
 
 HISTORY_KEEP = 20  # turns to store per channel (user+assistant = 1 turn = 2 rows)

@@ -36,6 +36,45 @@ python .claude/skills/memory-store/scripts/store_memory.py \
   --ai-message "✅ Got it, {DisplayName}! [one-line confirmation]"
 ```
 
+## Profile data — always run this AFTER store_memory for personal facts
+
+Whenever the memory is a personal fact about the user, also update the structured profile.
+Use the canonical key that best fits — or invent a `snake_case_key` if it's unique to this user.
+
+```bash
+python memory/update_profile.py \
+  --user-id "{DISCORD_ID}" \
+  --key "canonical_key" \
+  --value "extracted value"
+```
+
+**Canonical keys to use:**
+
+| Data type | Key |
+|---|---|
+| What to call the user ("call me X", "refer to me as X", "I am known as X", "my nickname is X") | `preferred_name` |
+| Full / legal name | `actual_name` |
+| City / location | `location` |
+| Job title + company | `role` |
+| Email | `email` |
+| Phone | `phone` |
+| Age or birth year | `age` |
+| Home airport | `home_airport` |
+| Timezone | `timezone` |
+| Anything else | invent a `snake_case_key` |
+
+**Examples:**
+```bash
+# "You can call me Sid"
+python memory/update_profile.py --user-id "123" --key preferred_name --value "Sid"
+
+# "I live in Jersey City"
+python memory/update_profile.py --user-id "123" --key location --value "Jersey City, NJ"
+
+# "I'm a marathon runner"  ← unique fact, invent key
+python memory/update_profile.py --user-id "123" --key hobby_marathon --value "marathon runner"
+```
+
 ## Store — Reminder (ask about repeat preference first)
 
 Before storing a reminder, ask the user:

@@ -68,11 +68,19 @@ CREATE TABLE IF NOT EXISTS channel_sessions (
 CREATE TABLE IF NOT EXISTS channel_history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id INTEGER NOT NULL,
-    role       TEXT NOT NULL,   -- 'user' or 'assistant'
+    role       TEXT NOT NULL,
     content    TEXT NOT NULL,
     ts         TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_channel_history_channel ON channel_history (channel_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS user_profile (
+    discord_id  TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    updated_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (discord_id, key)
+);
 """
 
 INSERT = """
@@ -87,6 +95,53 @@ def add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, col
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
         print(f"  Added column {column} to {table}")
+
+
+def _seed_user_profile():
+    """One-time seed of user_profile from existing permanent_memories.
+    Uses simple heuristics — the skill will keep it updated going forward."""
+    import re, sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from memory import profile_db
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT discord_id, index_title, context FROM permanent_memories WHERE context IS NOT NULL"
+    ).fetchall()
+    conn.close()
+
+    # Patterns: (profile_key, compiled_regex_to_extract_value)
+    extractors = [
+        ("preferred_name", re.compile(
+            r'(?:call me|goes?\s+by|known\s+as|nickname\s+is|refer(?:red)?\s+(?:to\s+me\s+)?as|'
+            r'you\s+can\s+call\s+me|prefer(?:red)?\s+(?:name|to\s+be\s+called)\s+(?:is\s+)?)'
+            r'\s*([A-Z][a-z]{1,20})\b', re.IGNORECASE)),
+        ("actual_name", re.compile(
+            r'(?:full\s+name\s+is|my\s+name\s+is|legal\s+name\s+is)\s+([A-Z][a-zA-Z\s]{2,40}?)(?:[,.]|$)',
+            re.IGNORECASE)),
+        ("location", re.compile(
+            r'(?:live[s]?\s+in|based\s+in|located\s+in|from)\s+([A-Z][a-zA-Z\s,]{2,40}?)(?:[,.]|$)',
+            re.IGNORECASE)),
+        ("role", re.compile(
+            r'(?:I\s+am\s+(?:a\s+|an\s+)?|my\s+(?:role|title|position)\s+is\s+)'
+            r'([A-Z][a-zA-Z\s,/]{2,60}?)(?:\s+at\s+|\.|$)',
+            re.IGNORECASE)),
+    ]
+
+    seeded = 0
+    for discord_id, index_title, context in rows:
+        for key, pattern in extractors:
+            m = pattern.search(context)
+            if m:
+                value = m.group(1).strip().strip('.,')
+                if discord_id:
+                    existing = profile_db.get_value(discord_id, key)
+                    if not existing:
+                        profile_db.set_value(discord_id, key, value)
+                        seeded += 1
+
+    if seeded:
+        print(f"  Seeded {seeded} user_profile entries from permanent_memories.")
 
 
 def migrate_csv(conn: sqlite3.Connection, csv_path: str, table: str) -> int:
@@ -124,6 +179,10 @@ def main():
 
     conn.commit()
     conn.close()
+
+    # Seed user_profile from existing permanent_memories (safe to re-run)
+    _seed_user_profile()
+
     print(f"Database ready: {DB_PATH}")
     print(f"  Migrated {p} permanent memories, {r} reminders.")
 
