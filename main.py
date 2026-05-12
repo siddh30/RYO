@@ -280,6 +280,27 @@ def _get_user_memories(discord_id: str) -> str:
     return "\n".join(r[0] for r in rows if r[0])
 
 
+def _get_preferred_name(discord_id: str, fallback: str) -> str:
+    """Return the user's preferred first name from permanent memory, or fallback."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT context FROM permanent_memories WHERE discord_id = ?",
+        (discord_id,),
+    ).fetchall()
+    conn.close()
+    for (context,) in rows:
+        m = re.search(r'goes by (\w+)', context, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        m = re.search(r'known as (\w+)', context, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        m = re.search(r'preferred name[:\s]+(\w+)', context, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return fallback
+
+
 HISTORY_KEEP = 20  # turns to store per channel (user+assistant = 1 turn = 2 rows)
 
 def _append_channel_history(channel_id: int, user_msg: str, assistant_msg: str):
@@ -705,12 +726,15 @@ class Client(discord.Client):
             return
 
         discord_id = str(message.author.id)
-        display_name = message.author.display_name
         username = message.author.name
+        display_name = message.author.display_name
 
         is_new = register_user(discord_id, username, display_name)
         if is_new:
             print(f"New user registered: {display_name} ({discord_id})")
+
+        # Use stored preferred name (e.g. "Sid") instead of Discord handle
+        display_name = _get_preferred_name(discord_id, fallback=display_name)
 
         channel_type = "travel" if channel_name == "ryo-travel" else "general"
 
