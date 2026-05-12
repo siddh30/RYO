@@ -4,7 +4,7 @@
 
 set -e
 
-SSH_KEY="$HOME/Desktop/ssh-key-2026-05-11 (3).key"
+SSH_KEY="$HOME/Downloads/ssh-key-2026-05-11 (3).key"
 SERVER="ubuntu@129.80.108.131"
 REPO="/home/ubuntu/Ryo"
 
