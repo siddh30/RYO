@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS channel_sessions (
     channel_type TEXT NOT NULL DEFAULT 'general',
     updated_at   TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS channel_history (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id INTEGER NOT NULL,
+    role       TEXT NOT NULL,   -- 'user' or 'assistant'
+    content    TEXT NOT NULL,
+    ts         TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_channel_history_channel ON channel_history (channel_id, id DESC);
 """
 
 INSERT = """

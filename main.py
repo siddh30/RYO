@@ -267,6 +267,53 @@ def _clear_channel_session(channel_id: int):
     conn.close()
 
 
+HISTORY_KEEP = 20  # turns to store per channel (user+assistant = 1 turn = 2 rows)
+
+def _append_channel_history(channel_id: int, user_msg: str, assistant_msg: str):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT INTO channel_history (channel_id, role, content) VALUES (?, 'user', ?)",
+        (channel_id, user_msg[:4000]),
+    )
+    conn.execute(
+        "INSERT INTO channel_history (channel_id, role, content) VALUES (?, 'assistant', ?)",
+        (channel_id, assistant_msg[:4000]),
+    )
+    # Keep only last HISTORY_KEEP turns (2 rows each)
+    conn.execute(
+        "DELETE FROM channel_history WHERE channel_id = ? AND id NOT IN ("
+        "  SELECT id FROM channel_history WHERE channel_id = ? ORDER BY id DESC LIMIT ?"
+        ")",
+        (channel_id, channel_id, HISTORY_KEEP * 2),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _get_channel_history(channel_id: int) -> str:
+    """Return recent turns as a text block to inject when starting a fresh session."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT role, content FROM channel_history WHERE channel_id = ? ORDER BY id ASC",
+        (channel_id,),
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return ""
+    lines = []
+    for role, content in rows:
+        label = "User" if role == "user" else "Assistant"
+        lines.append(f"{label}: {content}")
+    return "\n".join(lines)
+
+
+def _clear_channel_history(channel_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM channel_history WHERE channel_id = ?", (channel_id,))
+    conn.commit()
+    conn.close()
+
+
 # Regex to extract a date at the very start of a string, stopping before non-date content.
 # Handles: "24th May", "May 24th 2026", "June 7 2026", "2026-06-07", "05/24/2026"
 _DATE_PREFIX_RE = re.compile(
@@ -570,8 +617,10 @@ class Client(discord.Client):
         # !reset — clear session state without wiping messages
         if message.content.strip() == "!reset":
             _clear_channel_session(message.channel.id)
+            _clear_channel_history(message.channel.id)
             _pending_travel_prefs.discard(str(message.author.id))
             _pending_trip_events.pop(message.channel.id, None)
+            _vision_context.pop(message.channel.id, None)
             await message.channel.send("🔄 Session reset — fresh conversation started.")
             return
 
@@ -594,6 +643,8 @@ class Client(discord.Client):
             )
             await confirm.delete(delay=8)
             _clear_channel_session(message.channel.id)
+            _clear_channel_history(message.channel.id)
+            _vision_context.pop(message.channel.id, None)
             if channel_name == "ryo-stats" and message.guild:
                 await self._init_stats_panels()
             elif isinstance(message.channel, discord.TextChannel):
@@ -730,17 +781,34 @@ class Client(discord.Client):
                     f"[User's follow-up message]\n{user_msg}"
                 )
 
+            stored_session_id = _get_channel_session(channel_id)
+
+            # On a fresh session (no stored ID), prepend recent history so context survives restarts
+            if not stored_session_id:
+                history = _get_channel_history(channel_id)
+                if history:
+                    user_msg = (
+                        f"[Recent conversation history — for context only]\n{history}\n\n"
+                        f"[Latest message]\n{user_msg}"
+                    )
+
             async with message.channel.typing():
                 response, cost_info, new_session_id = await run_ceo(
                     user_message=user_msg,
                     discord_id=discord_id,
                     display_name=display_name,
                     channel_type=channel_type,
-                    session_id=_get_channel_session(channel_id),
+                    session_id=stored_session_id,
                 )
 
-            if new_session_id:
+            # If the SDK returned a different session ID, the old one was stale/expired —
+            # update the stored ID so future calls resume correctly.
+            if new_session_id and new_session_id != stored_session_id:
                 _save_channel_session(channel_id, new_session_id, channel_type)
+
+            # Persist this turn so it survives future restarts / session expiry
+            if response:
+                _append_channel_history(channel_id, message.content.strip(), response)
 
             # Off-topic routing: specialized channel redirects to general
             if response.startswith("<<ROUTE:general>>"):
@@ -749,16 +817,19 @@ class Client(discord.Client):
                 if message.guild:
                     general = self._get_general_channel(message.guild)
                     if general:
+                        gen_stored = _get_channel_session(general.id)
                         async with general.typing():
                             gen_response, cost_info, gen_session_id = await run_ceo(
                                 user_message=message.content.strip(),
                                 discord_id=discord_id,
                                 display_name=display_name,
                                 channel_type="general",
-                                session_id=_get_channel_session(general.id),
+                                session_id=gen_stored,
                             )
-                        if gen_session_id:
+                        if gen_session_id and gen_session_id != gen_stored:
                             _save_channel_session(general.id, gen_session_id, "general")
+                        if gen_response:
+                            _append_channel_history(general.id, message.content.strip(), gen_response)
                         for chunk in _chunk(_sanitize(gen_response)):
                             await general.send(f"↩️ *Redirected from #{channel_name}*\n{chunk}")
             else:
