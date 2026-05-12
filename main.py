@@ -41,6 +41,7 @@ _channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persiste
 _pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire
 _pending_trip_events: dict[int, dict] = {}  # channel_id -> pending duplicate-confirmation state
 _active_tasks: dict[int, asyncio.Task] = {}  # channel_id -> in-progress LLM task
+_vision_context: dict[int, str] = {}  # channel_id -> recent vision exchange to inject into next session turn
 
 
 def _sanitize(text: str) -> str:
@@ -646,14 +647,20 @@ class Client(discord.Client):
         ]
         if image_attachments:
             try:
+                user_q = message.content.strip() or "What is this?"
                 async with message.channel.typing():
                     vision_response = await run_vision(
-                        user_message=message.content.strip(),
+                        user_message=user_q,
                         attachment_urls=image_attachments,
                         display_name=display_name,
                     )
                 for chunk in _chunk(_sanitize(vision_response)):
                     await message.channel.send(chunk)
+                # Inject exchange into session so follow-up messages have context
+                _vision_context[message.channel.id] = (
+                    f"The user just shared an attachment and asked: \"{user_q}\"\n"
+                    f"You analysed it and responded:\n{vision_response}"
+                )
                 if message.guild:
                     await self._update_stats_panel(message.guild)
             except Exception as e:
@@ -713,9 +720,19 @@ class Client(discord.Client):
         channel_id = message.channel.id
 
         async def _process():
+            # If the previous turn was a vision/attachment analysis, inject that context
+            # so the agent knows what was discussed without it being in the SDK session.
+            pending_vision = _vision_context.pop(channel_id, None)
+            user_msg = message.content.strip()
+            if pending_vision:
+                user_msg = (
+                    f"[Prior turn context — attachment analysis]\n{pending_vision}\n\n"
+                    f"[User's follow-up message]\n{user_msg}"
+                )
+
             async with message.channel.typing():
                 response, cost_info, new_session_id = await run_ceo(
-                    user_message=message.content.strip(),
+                    user_message=user_msg,
                     discord_id=discord_id,
                     display_name=display_name,
                     channel_type=channel_type,
