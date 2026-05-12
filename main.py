@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import sqlite3
@@ -39,6 +40,7 @@ _stats_messages: dict[int, list[discord.Message]] = {}  # guild_id -> [embed mes
 _channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persistent dashboard
 _pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire
 _pending_trip_events: dict[int, dict] = {}  # channel_id -> pending duplicate-confirmation state
+_active_tasks: dict[int, asyncio.Task] = {}  # channel_id -> in-progress LLM task
 
 
 def _sanitize(text: str) -> str:
@@ -172,6 +174,8 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
                 "`!edit-event <partial name> <field> <value>` — edit a scheduled event\n"
                 "    ↳ fields: `title` · `date` · `location` · `description`\n"
                 "    ↳ e.g. `!edit-event Day 3 date 2026-05-22`\n"
+                "`!stop` — cancel a running response\n"
+                "`!reset` — clear conversation state (keeps messages)\n"
                 "🔒 `!clear-events` — delete all scheduled events\n"
                 "🔒 `!clear` — clear all messages"
             ),
@@ -212,6 +216,8 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
     e.add_field(
         name="⌨️ Commands",
         value=(
+            "`!stop` — cancel a running response\n"
+            "`!reset` — clear conversation state (keeps messages)\n"
             "🔒 `!clear` — clear all messages\n"
             "-# 🔒 = owner only · Conversation history persists across restarts"
         ),
@@ -550,6 +556,24 @@ class Client(discord.Client):
                 await confirm.delete(delay=5)
             return
 
+        # !stop — cancel in-progress LLM call for this channel
+        if message.content.strip() == "!stop":
+            task = _active_tasks.pop(message.channel.id, None)
+            if task and not task.done():
+                task.cancel()
+                await message.channel.send("⏹️ Stopped.")
+            else:
+                await message.channel.send("Nothing running.")
+            return
+
+        # !reset — clear session state without wiping messages
+        if message.content.strip() == "!reset":
+            _clear_channel_session(message.channel.id)
+            _pending_travel_prefs.discard(str(message.author.id))
+            _pending_trip_events.pop(message.channel.id, None)
+            await message.channel.send("🔄 Session reset — fresh conversation started.")
+            return
+
         # !clear — owner only, works in any channel
         if message.content.strip() == "!clear":
             if str(message.author.id) != conf.owner_discord_id:
@@ -688,52 +712,63 @@ class Client(discord.Client):
 
         channel_id = message.channel.id
 
-        async with message.channel.typing():
-            response, cost_info, new_session_id = await run_ceo(
-                user_message=message.content.strip(),
-                discord_id=discord_id,
-                display_name=display_name,
-                channel_type=channel_type,
-                session_id=_get_channel_session(channel_id),
-            )
+        async def _process():
+            async with message.channel.typing():
+                response, cost_info, new_session_id = await run_ceo(
+                    user_message=message.content.strip(),
+                    discord_id=discord_id,
+                    display_name=display_name,
+                    channel_type=channel_type,
+                    session_id=_get_channel_session(channel_id),
+                )
 
-        if new_session_id:
-            _save_channel_session(channel_id, new_session_id, channel_type)
+            if new_session_id:
+                _save_channel_session(channel_id, new_session_id, channel_type)
 
-        # Off-topic routing: specialized channel redirects to general
-        if response.startswith("<<ROUTE:general>>"):
-            redirect_msg = response.replace("<<ROUTE:general>>", "").strip()
-            await message.channel.send(_sanitize(redirect_msg))
+            # Off-topic routing: specialized channel redirects to general
+            if response.startswith("<<ROUTE:general>>"):
+                redirect_msg = response.replace("<<ROUTE:general>>", "").strip()
+                await message.channel.send(_sanitize(redirect_msg))
+                if message.guild:
+                    general = self._get_general_channel(message.guild)
+                    if general:
+                        async with general.typing():
+                            gen_response, cost_info, gen_session_id = await run_ceo(
+                                user_message=message.content.strip(),
+                                discord_id=discord_id,
+                                display_name=display_name,
+                                channel_type="general",
+                                session_id=_get_channel_session(general.id),
+                            )
+                        if gen_session_id:
+                            _save_channel_session(general.id, gen_session_id, "general")
+                        for chunk in _chunk(_sanitize(gen_response)):
+                            await general.send(f"↩️ *Redirected from #{channel_name}*\n{chunk}")
+            else:
+                for chunk in _chunk(_sanitize(response)):
+                    await message.channel.send(chunk)
+
+            if cost_info:
+                global _last_cost, _session_messages, _totals
+                _last_cost = cost_info
+                _session_messages += 1
+                cost_db.save(cost_info)
+                _totals = cost_db.load()
+                await self._check_low_credit()
+                if message.guild:
+                    await self._post_log(message.guild, channel_name, display_name, message.content.strip(), cost_info)
+
             if message.guild:
-                general = self._get_general_channel(message.guild)
-                if general:
-                    async with general.typing():
-                        gen_response, cost_info, gen_session_id = await run_ceo(
-                            user_message=message.content.strip(),
-                            discord_id=discord_id,
-                            display_name=display_name,
-                            channel_type="general",
-                            session_id=_get_channel_session(general.id),
-                        )
-                    if gen_session_id:
-                        _save_channel_session(general.id, gen_session_id, "general")
-                    for chunk in _chunk(_sanitize(gen_response)):
-                        await general.send(f"↩️ *Redirected from #{channel_name}*\n{chunk}")
-        else:
-            for chunk in _chunk(_sanitize(response)):
-                await message.channel.send(chunk)
+                await self._update_stats_panel(message.guild)
 
-        if cost_info:
-            _last_cost = cost_info
-            _session_messages += 1
-            cost_db.save(cost_info)
-            _totals = cost_db.load()
-            await self._check_low_credit()
-            if message.guild:
-                await self._post_log(message.guild, channel_name, display_name, message.content.strip(), cost_info)
-
-        if message.guild:
-            await self._update_stats_panel(message.guild)
+        task = asyncio.create_task(_process())
+        _active_tasks[channel_id] = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass  # !stop was called — already notified in the channel
+        finally:
+            _active_tasks.pop(channel_id, None)
 
     def _get_general_channel(self, guild: discord.Guild) -> discord.TextChannel | None:
         preferred = discord.utils.get(guild.text_channels, name="ryo-general")
