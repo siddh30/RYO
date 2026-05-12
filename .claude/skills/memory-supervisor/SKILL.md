@@ -39,20 +39,15 @@ python .claude/skills/memory-store/scripts/store_memory.py \
 ## Profile data — always run this AFTER store_memory for personal facts
 
 Whenever the memory is a personal fact about the user, also update the structured profile.
-Use the canonical key that best fits — or invent a `snake_case_key` if it's unique to this user.
+Keys come in two types — pick the right one and use the right command form.
 
-```bash
-python memory/update_profile.py \
-  --user-id "{DISCORD_ID}" \
-  --key "canonical_key" \
-  --value "extracted value"
-```
+### Key types
 
-**Canonical keys to use:**
+**SCALAR** — single value, replaced on update. Use plain `--value`.
 
-| Data type | Key |
+| Data | Key |
 |---|---|
-| What to call the user ("call me X", "refer to me as X", "I am known as X", "my nickname is X") | `preferred_name` |
+| What to call the user ("call me X", "refer to me as X", "I am known as X") | `preferred_name` |
 | Full / legal name | `actual_name` |
 | City / location | `location` |
 | Job title + company | `role` |
@@ -61,18 +56,50 @@ python memory/update_profile.py \
 | Age or birth year | `age` |
 | Home airport | `home_airport` |
 | Timezone | `timezone` |
-| Anything else | invent a `snake_case_key` |
 
-**Examples:**
+**BUCKET** — comma-separated accumulator, never overwritten. Always use `--append`.
+Bucket keys auto-append even without `--append`, but be explicit.
+
+| Data | Key |
+|---|---|
+| Languages spoken | `languages` |
+| Hobbies / leisure | `hobbies` |
+| Sports / physical activities | `sports` |
+| General interests / topics | `interests` |
+| Professional / technical skills | `skills` |
+| Credit or charge cards | `credit_cards` |
+| Dietary preferences / restrictions | `dietary_preferences` |
+| Allergies / intolerances | `allergies` |
+| Pets | `pets` |
+| Goals | `goals` |
+| News topics followed | `news_interests` |
+| Travel wishlist / bucket list | `travel_wishlist` |
+
+### When to invent a custom key
+
+Only invent a new key when the fact **cannot** fit any bucket above.
+Name it as a **category** (`snake_case`), not a specific fact — so future similar facts land in the same bucket.
+
+- ❌ `hobby_marathon` — too specific, won't catch "I also cycle"
+- ✅ `sports: marathon running` — use the `sports` bucket instead
+- ❌ `project_ryo` — reasonable if truly unique
+- ✅ `dev_projects` — better if the user might mention more projects
+
+### Commands
+
 ```bash
-# "You can call me Sid"
-python memory/update_profile.py --user-id "123" --key preferred_name --value "Sid"
+# Scalar — replace
+python memory/update_profile.py --user-id "{DISCORD_ID}" --key preferred_name --value "Sid"
 
-# "I live in Jersey City"
-python memory/update_profile.py --user-id "123" --key location --value "Jersey City, NJ"
+# Bucket — append (script also auto-appends for known bucket keys)
+python memory/update_profile.py --user-id "{DISCORD_ID}" --key sports --value "marathon running" --append
+python memory/update_profile.py --user-id "{DISCORD_ID}" --key credit_cards --value "AMEX Platinum" --append
 
-# "I'm a marathon runner"  ← unique fact, invent key
-python memory/update_profile.py --user-id "123" --key hobby_marathon --value "marathon runner"
+# Custom category bucket
+python memory/update_profile.py --user-id "{DISCORD_ID}" --key dev_projects --value "RYO Discord bot" --append
+
+# List current profile
+python memory/update_profile.py --user-id "{DISCORD_ID}" --list
 ```
 
 ## Store — Reminder (ask about repeat preference first)
