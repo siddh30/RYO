@@ -270,10 +270,11 @@ def _clear_channel_session(channel_id: int):
 
 
 def _get_user_memories(discord_id: str) -> str:
-    """Load all permanent memories for a user to inject into the system context."""
+    """Load permanent memories for a user. Includes legacy rows with NULL discord_id."""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT context FROM permanent_memories WHERE discord_id = ? ORDER BY id ASC",
+        "SELECT DISTINCT context FROM permanent_memories "
+        "WHERE discord_id = ? OR discord_id IS NULL ORDER BY id ASC",
         (discord_id,),
     ).fetchall()
     conn.close()
@@ -284,20 +285,19 @@ def _get_preferred_name(discord_id: str, fallback: str) -> str:
     """Return the user's preferred first name from permanent memory, or fallback."""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT context FROM permanent_memories WHERE discord_id = ?",
+        "SELECT DISTINCT context FROM permanent_memories "
+        "WHERE discord_id = ? OR discord_id IS NULL",
         (discord_id,),
     ).fetchall()
     conn.close()
     for (context,) in rows:
-        m = re.search(r'goes by (\w+)', context, re.IGNORECASE)
+        # Matches: "call me Sid", "goes by Sid", "known as Sid", "preferred name: Sid"
+        m = re.search(
+            r'(?:call me|goes by|known as|preferred name[:\s]+)\s*([A-Z][a-z]+)',
+            context, re.IGNORECASE,
+        )
         if m:
-            return m.group(1)
-        m = re.search(r'known as (\w+)', context, re.IGNORECASE)
-        if m:
-            return m.group(1)
-        m = re.search(r'preferred name[:\s]+(\w+)', context, re.IGNORECASE)
-        if m:
-            return m.group(1)
+            return m.group(1).capitalize()
     return fallback
 
 
