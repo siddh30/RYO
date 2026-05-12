@@ -19,18 +19,21 @@ async def run_ceo(
     display_name: str,
     channel_type: str = "general",
     session_id: str | None = None,
+    user_memories: str = "",
 ) -> tuple[str, dict, str | None]:
     rm = ResourceManager.get_instance()
     prompt_name = CHANNEL_PROMPTS.get(channel_type, "ceo_prompt")
     base_prompt = rm.prompt_loader(prompt_name)
 
-    # Re-injected fresh each turn so the model always knows the current speaker,
-    # even when resuming a session that was started by a different user.
+    # Re-injected fresh each turn so the model always knows the current speaker.
+    # user_memories pre-loads permanent memory so the agent never has to call a tool
+    # just to know the user's name or preferences.
     user_context = (
         f"\n<CurrentUser>\n"
         f"DisplayName: {display_name}\n"
         f"DiscordID: {discord_id}\n"
-        f"</CurrentUser>"
+        + (f"Profile:\n{user_memories}\n" if user_memories else "")
+        + f"</CurrentUser>"
     )
 
     tool_calls: list[dict] = []  # telemetry: [{name, summary}]

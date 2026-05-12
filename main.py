@@ -41,7 +41,7 @@ _channel_dashboards: dict[int, discord.Message] = {}    # channel_id -> persiste
 _pending_travel_prefs: set[str] = set()  # discord_ids awaiting travel pref questionnaire
 _pending_trip_events: dict[int, dict] = {}  # channel_id -> pending duplicate-confirmation state
 _active_tasks: dict[int, asyncio.Task] = {}  # channel_id -> in-progress LLM task
-_vision_context: dict[int, str] = {}  # channel_id -> recent vision exchange to inject into next session turn
+_file_cache: dict[int, list[str]] = {}  # channel_id -> list of analyzed file summaries (persists for multi-turn)
 
 
 def _sanitize(text: str) -> str:
@@ -176,7 +176,8 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
                 "    ↳ fields: `title` · `date` · `location` · `description`\n"
                 "    ↳ e.g. `!edit-event Day 3 date 2026-05-22`\n"
                 "`!stop` — cancel a running response\n"
-                "`!reset` — clear conversation state (keeps messages)\n"
+                "🔒 `!reset` — clear conversation state (keeps messages)\n"
+                "🔒 `!empty-file-caches` — forget all shared files\n"
                 "🔒 `!clear-events` — delete all scheduled events\n"
                 "🔒 `!clear` — clear all messages"
             ),
@@ -218,7 +219,8 @@ def _channel_dashboard_embed(channel_name: str) -> discord.Embed | None:
         name="⌨️ Commands",
         value=(
             "`!stop` — cancel a running response\n"
-            "`!reset` — clear conversation state (keeps messages)\n"
+            "🔒 `!reset` — clear conversation state (keeps messages)\n"
+            "🔒 `!empty-file-caches` — forget all shared files\n"
             "🔒 `!clear` — clear all messages\n"
             "-# 🔒 = owner only · Conversation history persists across restarts"
         ),
@@ -265,6 +267,17 @@ def _clear_channel_session(channel_id: int):
     conn.execute("DELETE FROM channel_sessions WHERE channel_id = ?", (channel_id,))
     conn.commit()
     conn.close()
+
+
+def _get_user_memories(discord_id: str) -> str:
+    """Load all permanent memories for a user to inject into the system context."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT context FROM permanent_memories WHERE discord_id = ? ORDER BY id ASC",
+        (discord_id,),
+    ).fetchall()
+    conn.close()
+    return "\n".join(r[0] for r in rows if r[0])
 
 
 HISTORY_KEEP = 20  # turns to store per channel (user+assistant = 1 turn = 2 rows)
@@ -614,14 +627,26 @@ class Client(discord.Client):
                 await message.channel.send("Nothing running.")
             return
 
-        # !reset — clear session state without wiping messages
+        # !reset — owner only; clear session + history without wiping messages
         if message.content.strip() == "!reset":
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can reset the session.")
+                return
             _clear_channel_session(message.channel.id)
             _clear_channel_history(message.channel.id)
             _pending_travel_prefs.discard(str(message.author.id))
             _pending_trip_events.pop(message.channel.id, None)
-            _vision_context.pop(message.channel.id, None)
+            _file_cache.pop(message.channel.id, None)
             await message.channel.send("🔄 Session reset — fresh conversation started.")
+            return
+
+        # !empty-file-caches — owner only; clear cached file analyses for this channel
+        if message.content.strip() == "!empty-file-caches":
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can clear file caches.")
+                return
+            _file_cache.pop(message.channel.id, None)
+            await message.channel.send("🗑️ File cache cleared — previously shared files will no longer be referenced.")
             return
 
         # !clear — owner only, works in any channel
@@ -644,7 +669,7 @@ class Client(discord.Client):
             await confirm.delete(delay=8)
             _clear_channel_session(message.channel.id)
             _clear_channel_history(message.channel.id)
-            _vision_context.pop(message.channel.id, None)
+            _file_cache.pop(message.channel.id, None)
             if channel_name == "ryo-stats" and message.guild:
                 await self._init_stats_panels()
             elif isinstance(message.channel, discord.TextChannel):
@@ -707,11 +732,12 @@ class Client(discord.Client):
                     )
                 for chunk in _chunk(_sanitize(vision_response)):
                     await message.channel.send(chunk)
-                # Inject exchange into session so follow-up messages have context
-                _vision_context[message.channel.id] = (
-                    f"The user just shared an attachment and asked: \"{user_q}\"\n"
-                    f"You analysed it and responded:\n{vision_response}"
+                # Persist file analysis for multi-turn follow-ups in this channel
+                entry = (
+                    f"User shared a file and asked: \"{user_q}\"\n"
+                    f"Your analysis:\n{vision_response}"
                 )
+                _file_cache.setdefault(message.channel.id, []).append(entry)
                 if message.guild:
                     await self._update_stats_panel(message.guild)
             except Exception as e:
@@ -773,12 +799,15 @@ class Client(discord.Client):
         async def _process():
             # If the previous turn was a vision/attachment analysis, inject that context
             # so the agent knows what was discussed without it being in the SDK session.
-            pending_vision = _vision_context.pop(channel_id, None)
             user_msg = message.content.strip()
-            if pending_vision:
+
+            # Inject cached file analyses so multi-turn PDF/image questions work
+            cached_files = _file_cache.get(channel_id, [])
+            if cached_files:
+                files_block = "\n\n---\n\n".join(cached_files)
                 user_msg = (
-                    f"[Prior turn context — attachment analysis]\n{pending_vision}\n\n"
-                    f"[User's follow-up message]\n{user_msg}"
+                    f"[Files shared in this conversation — reference as needed]\n{files_block}\n\n"
+                    f"[User message]\n{user_msg}"
                 )
 
             stored_session_id = _get_channel_session(channel_id)
@@ -792,6 +821,8 @@ class Client(discord.Client):
                         f"[Latest message]\n{user_msg}"
                     )
 
+            user_memories = _get_user_memories(discord_id)
+
             async with message.channel.typing():
                 response, cost_info, new_session_id = await run_ceo(
                     user_message=user_msg,
@@ -799,6 +830,7 @@ class Client(discord.Client):
                     display_name=display_name,
                     channel_type=channel_type,
                     session_id=stored_session_id,
+                    user_memories=user_memories,
                 )
 
             # If the SDK returned a different session ID, the old one was stale/expired —
