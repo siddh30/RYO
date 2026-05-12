@@ -52,7 +52,7 @@ async def run_vision(
     })
 
     client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    response = await client.messages.create(
+    response = await client.beta.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=2048,
         system=VISION_SYSTEM + f"\nThe user's name is {display_name}.",

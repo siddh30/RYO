@@ -621,16 +621,20 @@ class Client(discord.Client):
             or a.content_type == "application/pdf"
         ]
         if image_attachments:
-            async with message.channel.typing():
-                vision_response = await run_vision(
-                    user_message=message.content.strip(),
-                    attachment_urls=image_attachments,
-                    display_name=display_name,
-                )
-            for chunk in _chunk(_sanitize(vision_response)):
-                await message.channel.send(chunk)
-            if message.guild:
-                await self._update_stats_panel(message.guild)
+            try:
+                async with message.channel.typing():
+                    vision_response = await run_vision(
+                        user_message=message.content.strip(),
+                        attachment_urls=image_attachments,
+                        display_name=display_name,
+                    )
+                for chunk in _chunk(_sanitize(vision_response)):
+                    await message.channel.send(chunk)
+                if message.guild:
+                    await self._update_stats_panel(message.guild)
+            except Exception as e:
+                print(f"Vision error: {e}")
+                await message.channel.send("⚠️ Couldn't analyse that file — please try again.")
             return
 
         # !clear-events — ryo-travel only, owner only
