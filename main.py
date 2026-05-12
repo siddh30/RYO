@@ -22,6 +22,7 @@ from agents.trip_planner import (
 )
 from memory.register_user import register_user
 from memory import cost_db, profile_db
+from memory.consolidate_profiles import consolidate_all, consolidate_user
 
 import discord
 from discord.ext import tasks
@@ -485,6 +486,7 @@ class Client(discord.Client):
         _totals = cost_db.load()
         print(f"Logged on as {self.user}!")
         self.reminder_loop.start()
+        self.profile_consolidation_loop.start()
         await self._ensure_channel("ryo-travel", "✈️ Travel itineraries and trip planning with RYO.")
         await self._ensure_channel("ryo-general", "💬 General chat with RYO — news, weather, reminders, memory.")
         await self._init_stats_panels()
@@ -619,6 +621,28 @@ class Client(discord.Client):
                     _reschedule_reminder(reminder["id"], snooze_interval, repeat_count - 1)
                 print(f"Pinged {discord_id}: {index_title} (repeat_count={repeat_count})")
 
+    @tasks.loop(hours=24)
+    async def profile_consolidation_loop(self):
+        """Daily background job: merge semantically overlapping profile keys."""
+        try:
+            report = await consolidate_all()
+            if report and self.guilds:
+                guild = self.guilds[0]
+                logs_ch = self._get_logs_channel(guild)
+                if logs_ch:
+                    lines = []
+                    for uid, merges in report.items():
+                        for m in merges:
+                            lines.append(f"• `{uid}` — {m}")
+                    embed = discord.Embed(
+                        title="🔄 Profile Consolidation",
+                        description="\n".join(lines) or "Nothing merged.",
+                        color=0x5865F2,
+                    )
+                    await logs_ch.send(embed=embed)
+        except Exception as e:
+            print(f"Profile consolidation error: {e}")
+
     async def on_message(self, message):
         global _totals, _last_cost, _session_messages
 
@@ -673,6 +697,31 @@ class Client(discord.Client):
                 return
             _file_cache.pop(message.channel.id, None)
             await message.channel.send("🗑️ File cache cleared — previously shared files will no longer be referenced.")
+            return
+
+        # !consolidate-profiles — owner only; run profile consolidation immediately
+        if message.content.strip() == "!consolidate-profiles":
+            if str(message.author.id) != conf.owner_discord_id:
+                await message.channel.send("🚫 Only the bot owner can run profile consolidation.")
+                return
+            async with message.channel.typing():
+                try:
+                    report = await consolidate_all()
+                    if report:
+                        lines = []
+                        for uid, merges in report.items():
+                            for m in merges:
+                                lines.append(f"• `{uid}` — {m}")
+                        embed = discord.Embed(
+                            title="🔄 Profile Consolidation",
+                            description="\n".join(lines),
+                            color=0x5865F2,
+                        )
+                        await message.channel.send(embed=embed)
+                    else:
+                        await message.channel.send("✅ All profiles are clean — nothing to merge.")
+                except Exception as e:
+                    await message.channel.send(f"❌ Consolidation error: {e}")
             return
 
         # !clear — owner only, works in any channel
