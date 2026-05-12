@@ -28,11 +28,13 @@ async def run_ceo(
     # Re-injected fresh each turn so the model always knows the current speaker.
     # user_memories pre-loads permanent memory so the agent never has to call a tool
     # just to know the user's name or preferences.
+    # DisplayName is the resolved preferred name where possible; if Profile says
+    # otherwise, always defer to the name stated in Profile.
     user_context = (
         f"\n<CurrentUser>\n"
         f"DisplayName: {display_name}\n"
         f"DiscordID: {discord_id}\n"
-        + (f"Profile:\n{user_memories}\n" if user_memories else "")
+        + (f"Profile (use the name stated here when addressing the user):\n{user_memories}\n" if user_memories else "")
         + f"</CurrentUser>"
     )
 

@@ -281,8 +281,31 @@ def _get_user_memories(discord_id: str) -> str:
     return "\n".join(r[0] for r in rows if r[0])
 
 
+_preferred_name_cache: dict[str, str] = {}  # discord_id -> resolved preferred name
+
+# Broad pattern covering natural ways someone says what they want to be called:
+# "call me Sid", "refer me as Sid", "refer to me as Sid", "I'm known as Sid",
+# "I go by Sid", "goes by Sid", "my name is Sid", "my preferred name is Sid",
+# "my nickname is Sid", "you can call me Sid", "I am Sid", "I'm Sid"
+_PREFERRED_NAME_RE = re.compile(
+    r'(?:'
+    r'(?:you\s+can\s+)?(?:call|refer(?:\s+to)?)\s+me\s+(?:as\s+)?'
+    r'|go(?:es)?\s+by\s+'
+    r'|known\s+as\s+'
+    r'|my\s+(?:preferred\s+|nick)?name\s+is\s+'
+    r'|I\s+go\s+by\s+'
+    r'|I(?:\'m|\s+am)\s+(?:called\s+|known\s+as\s+)?'
+    r')([A-Z][a-z]{1,20})\b',
+    re.IGNORECASE,
+)
+
+
 def _get_preferred_name(discord_id: str, fallback: str) -> str:
-    """Return the user's preferred first name from permanent memory, or fallback."""
+    """Return the user's preferred first name from permanent memory, or fallback.
+    Results are cached for the lifetime of the process."""
+    if discord_id in _preferred_name_cache:
+        return _preferred_name_cache[discord_id]
+
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
         "SELECT DISTINCT context FROM permanent_memories "
@@ -290,14 +313,15 @@ def _get_preferred_name(discord_id: str, fallback: str) -> str:
         (discord_id,),
     ).fetchall()
     conn.close()
+
     for (context,) in rows:
-        # Matches: "call me Sid", "goes by Sid", "known as Sid", "preferred name: Sid"
-        m = re.search(
-            r'(?:call me|goes by|known as|preferred name[:\s]+)\s*([A-Z][a-z]+)',
-            context, re.IGNORECASE,
-        )
+        m = _PREFERRED_NAME_RE.search(context)
         if m:
-            return m.group(1).capitalize()
+            name = m.group(1).capitalize()
+            _preferred_name_cache[discord_id] = name
+            return name
+
+    _preferred_name_cache[discord_id] = fallback
     return fallback
 
 
@@ -658,6 +682,7 @@ class Client(discord.Client):
             _pending_travel_prefs.discard(str(message.author.id))
             _pending_trip_events.pop(message.channel.id, None)
             _file_cache.pop(message.channel.id, None)
+            _preferred_name_cache.clear()
             await message.channel.send("🔄 Session reset — fresh conversation started.")
             return
 
